@@ -6,12 +6,12 @@ This project is a client and server combo tiled map multiplayer/MMO game engine.
 
 Some features (Compared with the port of the [TiledMMO](https://github.com/Joey92/TiledMMO) project) include:
 
-[x] Multiplayer support
-[x] NPCs via object layer
-  [] properties on the objects configure how the NPC behaves
-[] NPC navigation via navmesh
-[] Portals to other maps
-[] Full scripting support
+- [x] Multiplayer support
+- [x] NPCs via object layer
+  - [] properties on the objects configure how the NPC behaves
+- [] NPC navigation via navmesh
+- [] Portals to other maps
+- [] Full scripting support
 
 Upcoming features:
 
