@@ -8,10 +8,10 @@ Some features (Compared with the port of the [TiledMMO](https://github.com/Joey9
 
 - [x] Multiplayer support
 - [x] NPCs via object layer
-  - [] properties on the objects configure how the NPC behaves
-- [] NPC navigation via navmesh
-- [] Portals to other maps
-- [] Full scripting support
+  - [ ] properties on the objects configure how the NPC behaves
+- [ ] NPC navigation via navmesh
+- [ ] Portals to other maps
+- [ ] Full scripting support
 
 Upcoming features:
 
