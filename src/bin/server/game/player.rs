@@ -33,14 +33,14 @@ pub fn player_join(
         commands
             .entity(player_entity)
             .insert((
-                UnitBundle::new("John Doe".into(), Transform::from_xyz(30., 30., 0.9)),
+                UnitBundle::new("John Doe".into(), Transform::from_xyz(30., 30., 0.)),
                 Player,
             ))
             // add teleport component so the map change system can handle it
             .insert(Teleport {
-                map: MapName("start.tmx".to_string()),        // todo: db
-                position: Transform::from_xyz(30., 30., 0.9), // todo: db
-                map_instance: None,                           // todo: db
+                map: MapName("start.tmx".to_string()),       // todo: db
+                position: Transform::from_xyz(30., 30., 0.), // todo: db
+                map_instance: None,                          // todo: db
                 prev_map_instance: None,
             });
     }

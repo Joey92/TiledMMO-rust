@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use tiled_game::{
+    calc_z_pos,
     components::*,
     network::messages::server::{ServerMessages, Vitals},
 };
@@ -7,7 +8,7 @@ use tiled_game::{
 use crate::game::{
     combat::LeaveCombatEvent,
     map::DespawnEvent,
-    npc::NPC,
+    npc::{Friendly, NPC},
     player::{Charmed, Player},
     unit::{DeathEvent, Unit},
 };
@@ -167,6 +168,61 @@ pub fn send_movement(
                 });
             }
         }
+    }
+}
+
+pub struct SendEntityInfoEvent {
+    pub client_id: u64,
+    pub entity: Entity,
+}
+
+pub fn send_entity_info(
+    mut events: EventReader<SendEntityInfoEvent>,
+    mut server_message: EventWriter<SendServerMessageEvent>,
+    entities: Query<(
+        &Name,
+        &Transform,
+        &Health,
+        &MaxHealth,
+        &Mana,
+        &MaxMana,
+        Option<&Player>,
+        Option<&Friendly>,
+        Option<&Threat>,
+    )>,
+) {
+    for event in events.iter() {
+        let entity = event.entity;
+        let entity_ref = entities.get(entity).ok();
+
+        let event = match entity_ref {
+            Some((name, transform, health, max_health, mana, max_mana, player, friend, threat)) => {
+                SendServerMessageEvent {
+                    client_id: Some(event.client_id),
+                    message: ServerMessages::EntityInfo {
+                        entity,
+                        pos: transform.translation,
+                        name: name.to_string(),
+                        is_player: player.is_some(),
+                        friendly: friend.is_some(),
+                        health: health.0,
+                        max_health: max_health.0,
+                        mana: mana.0,
+                        max_mana: max_mana.0,
+                        threat: threat.map(|t| Some(t.0.clone())).unwrap_or(None),
+                    },
+                }
+            }
+            _ => {
+                // entity doesn't exist.. send a despawn message
+                SendServerMessageEvent {
+                    client_id: Some(event.client_id),
+                    message: ServerMessages::Despawn { entity },
+                }
+            }
+        };
+
+        server_message.send(event);
     }
 }
 

@@ -53,8 +53,7 @@ pub enum ServerMessages {
     // consider adding a EntityInfo ClientMessage to request this info
     EntityInfo {
         entity: Entity,
-        x: f32,
-        y: f32,
+        pos: Vec3,
         name: String,
         is_player: bool,
         friendly: bool,
@@ -77,7 +76,7 @@ pub enum ServerMessages {
     // send the client the entity ID of the server side player entity
     PlayerInfo {
         entity: Entity,
-        translation: Vec3,
+        pos: Vec3,
     },
 
     Threat {

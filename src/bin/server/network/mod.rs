@@ -7,21 +7,14 @@ use bevy_renet::{
     renet::{RenetServer, ServerAuthentication, ServerConfig, ServerEvent},
     RenetServerPlugin,
 };
-use tiled_game::{
-    components::*,
-    network::{
-        messages::{client::ClientMessages, server::ServerMessages},
-        server_connection_config, ClientChannel, ServerChannel, PROTOCOL_ID,
-    },
+use tiled_game::network::{
+    messages::{client::ClientMessages, server::ServerMessages},
+    server_connection_config, ClientChannel, ServerChannel, PROTOCOL_ID,
 };
 
 use sync_systems::*;
 
-use crate::game::{
-    npc::Friendly,
-    player::{LoggingOut, Player},
-    unit::Target,
-};
+use crate::game::{player::LoggingOut, unit::Target};
 
 #[derive(Component, Debug)]
 pub struct NetworkClientId(pub u64);
@@ -46,6 +39,7 @@ impl Plugin for NetworkPlugin {
             .insert_resource(new_renet_server())
             .insert_resource(NetworkResource::default())
             .add_event::<SendServerMessageEvent>()
+            .add_event::<SendEntityInfoEvent>()
             .add_system_set(
                 SystemSet::new()
                     .with_system(send_movement)
@@ -56,6 +50,7 @@ impl Plugin for NetworkPlugin {
                     .with_system(send_entered_combat)
                     .with_system(send_spawn)
                     .with_system(send_exit_combat)
+                    .with_system(send_entity_info)
                     .label("ecs_sync"),
             )
             // Receive Server Events
@@ -65,8 +60,6 @@ impl Plugin for NetworkPlugin {
                 handle_client_messages.after(handle_connection_events),
             )
             .add_system(send_message_system.after("ecs_sync"))
-            .add_event::<SendEntityInfoEvent>()
-            .add_system(handle_entity_info_system)
             .add_system(disconnect_clients_on_exit);
     }
 }
@@ -117,7 +110,7 @@ fn handle_connection_events(
                     client_id: Some(*id),
                     message: ServerMessages::PlayerInfo {
                         entity,
-                        translation: Vec3::new(0., 0., 3.),
+                        pos: Vec3::new(0., 0., 0.),
                     },
                 });
             }
@@ -130,62 +123,6 @@ fn handle_connection_events(
                 }
             }
         }
-    }
-}
-
-struct SendEntityInfoEvent {
-    client_id: u64,
-    entity: Entity,
-}
-
-fn handle_entity_info_system(
-    mut events: EventReader<SendEntityInfoEvent>,
-    mut server_message: EventWriter<SendServerMessageEvent>,
-    entities: Query<(
-        &Name,
-        &Transform,
-        &Health,
-        &MaxHealth,
-        &Mana,
-        &MaxMana,
-        Option<&Player>,
-        Option<&Friendly>,
-        Option<&Threat>,
-    )>,
-) {
-    for event in events.iter() {
-        let entity = event.entity;
-        let entity_ref = entities.get(entity).ok();
-
-        let event = match entity_ref {
-            Some((name, transform, health, max_health, mana, max_mana, player, friend, threat)) => {
-                SendServerMessageEvent {
-                    client_id: Some(event.client_id),
-                    message: ServerMessages::EntityInfo {
-                        entity,
-                        x: transform.translation.x,
-                        y: transform.translation.y,
-                        name: name.to_string(),
-                        is_player: player.is_some(),
-                        friendly: friend.is_some(),
-                        health: health.0,
-                        max_health: max_health.0,
-                        mana: mana.0,
-                        max_mana: max_mana.0,
-                        threat: threat.map(|t| Some(t.0.clone())).unwrap_or(None),
-                    },
-                }
-            }
-            _ => {
-                // entity doesn't exist.. send a despawn message
-                SendServerMessageEvent {
-                    client_id: Some(event.client_id),
-                    message: ServerMessages::Despawn { entity },
-                }
-            }
-        };
-
-        server_message.send(event);
     }
 }
 
@@ -204,7 +141,7 @@ fn handle_client_messages(
                     ClientMessages::Move { x, y } => {
                         commands
                             .entity(*entity)
-                            .insert(Transform::from_xyz(x, y, 3.0));
+                            .insert(Transform::from_xyz(x, y, 0.));
                     }
                     ClientMessages::Ready => todo!("Handle ready message"),
                     ClientMessages::RequestEntityInfo { entity } => {

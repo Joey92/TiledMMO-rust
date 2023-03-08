@@ -57,6 +57,8 @@ fn panic_on_error_system(mut renet_error: EventReader<RenetError>) {
     }
 }
 
+// Every entity with this component
+// can be controlled by the server
 #[derive(Debug, Component)]
 pub struct ServerSideEntity(pub Entity);
 
@@ -79,7 +81,8 @@ impl Plugin for NetworkPlugin {
                 SystemSet::new()
                     .with_run_criteria(run_if_client_connected)
                     .with_system(handle_server_messages)
-                    .with_system(sync_movement),
+                    .with_system(sync_movement)
+                    .label("network"),
             )
             .add_system_to_stage(CoreStage::Last, disconnect_on_exit)
             .add_system(panic_on_error_system);
@@ -119,7 +122,7 @@ fn handle_server_messages(
         }
 
         let server_message = server_message.unwrap();
-        log::info!("Received message from server: {:?}", server_message);
+        log::debug!("Received message from server: {:?}", server_message);
         match server_message {
             ServerMessages::Despawn { entity } => {
                 let client_side_entity = client_state.server_client_entity_mapping.remove(&entity);
@@ -132,7 +135,7 @@ fn handle_server_messages(
             ServerMessages::Spawn {
                 entity: server_entity,
             } => {
-                log::info!("Spawn entity: {:?}", server_entity);
+                log::debug!("Spawn entity: {:?}", server_entity);
                 let client_side_entity = commands.spawn(ServerSideEntity(server_entity)).id();
                 client_state
                     .server_client_entity_mapping
@@ -147,8 +150,7 @@ fn handle_server_messages(
             }
             ServerMessages::EntityInfo {
                 entity: server_entity,
-                x,
-                y,
+                pos,
                 name,
                 is_player,
                 friendly,
@@ -179,7 +181,7 @@ fn handle_server_messages(
                     MapName(name.clone()),
                     Name::new(name),
                     SpriteBundle {
-                        transform: Transform::from_xyz(x, y, 1.),
+                        transform: Transform::from_translation(pos),
                         sprite: Sprite {
                             color,
                             custom_size: Some(Vec2::new(50.0, 100.0)),
@@ -207,7 +209,7 @@ fn handle_server_messages(
                     .get(&server_entity);
 
                 if let Some(client_side_entity) = client_side_entity {
-                    log::info!("Move entity: {:?}", server_entity);
+                    log::debug!("Move entity: {:?}", server_entity);
                     commands
                         .entity(*client_side_entity)
                         .insert(Transform::from_translation(pos));
@@ -215,11 +217,13 @@ fn handle_server_messages(
             }
             ServerMessages::PlayerInfo {
                 entity: server_entity,
-                translation,
+                pos,
             } => {
                 client_state.player_entity = Some(server_entity);
                 let client_entity = commands
                     .spawn((
+                        Player,
+                        ServerSideEntity(server_entity),
                         RigidBody::Dynamic,
                         GravityScale(0.0),
                         Restitution {
@@ -228,7 +232,7 @@ fn handle_server_messages(
                         },
                         LockedAxes::ROTATION_LOCKED,
                         SpriteBundle {
-                            transform: Transform::from_translation(translation),
+                            transform: Transform::from_translation(pos),
                             sprite: Sprite {
                                 color: Color::rgb(0., 0.25, 0.75),
                                 custom_size: Some(Vec2::new(40.0, 40.0)),
@@ -237,7 +241,6 @@ fn handle_server_messages(
                             ..default()
                         },
                         Collider::cuboid(20., 20.),
-                        Player,
                         Name::new("player"),
                         CameraTarget,
                     ))
