@@ -1,11 +1,29 @@
 use bevy::prelude::*;
-use tiled_game::shared_components::Player;
 
-use crate::network::NetworkClientId;
+use crate::{game::unit::UnitBundle, network::NetworkClientId};
 
-use super::map::{MapName, Teleport};
+use super::map::{DespawnEvent, MapName, Teleport};
 
-pub fn add_new_player(
+#[derive(Component)]
+pub struct Player;
+
+#[derive(Component)]
+pub struct LoggingOut;
+
+// Set this on a player
+// when the server should dictate the position of the player
+#[derive(Component)]
+pub struct Charmed;
+
+pub struct PlayerPlugin;
+
+impl Plugin for PlayerPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_system(player_join).add_system(player_logout);
+    }
+}
+
+pub fn player_join(
     mut commands: Commands,
     new_connected_players: Query<Entity, Added<NetworkClientId>>,
 ) {
@@ -14,19 +32,37 @@ pub fn add_new_player(
         // fetch player info from database
         commands
             .entity(player_entity)
-            .insert(Player)
-            // add name
-            .insert(Name::new("John Doe")) // todo: db
-            .insert(SpatialBundle {
-                transform: Transform::from_xyz(0.0, 0.0, 0.0),
-                ..Default::default()
-            })
+            .insert((
+                UnitBundle::new("John Doe".into(), Transform::from_xyz(30., 30., 0.9)),
+                Player,
+            ))
             // add teleport component so the map change system can handle it
             .insert(Teleport {
-                map: MapName("start.tmx".to_string()),       // todo: db
-                position: Transform::from_xyz(30., 30., 0.), // todo: db
-                map_instance: None,                          // todo: db
+                map: MapName("start.tmx".to_string()),        // todo: db
+                position: Transform::from_xyz(30., 30., 0.9), // todo: db
+                map_instance: None,                           // todo: db
                 prev_map_instance: None,
             });
+    }
+}
+
+pub fn player_logout(
+    mut commands: Commands,
+    players_logging_out: Query<(Entity, &Parent), With<LoggingOut>>,
+    mut despawn_events: EventWriter<DespawnEvent>,
+) {
+    for (player_entity, map_instance_entity) in players_logging_out.iter() {
+        // remove child from map instance
+        commands
+            .entity(map_instance_entity.get())
+            .remove_children(&[player_entity]);
+
+        // remove player from map
+        commands.entity(player_entity).despawn_recursive();
+
+        despawn_events.send(DespawnEvent {
+            entity: player_entity,
+            map: map_instance_entity.get(),
+        });
     }
 }

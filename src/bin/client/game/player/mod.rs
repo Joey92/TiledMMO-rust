@@ -1,11 +1,5 @@
 use bevy::prelude::{App, Component, Plugin};
 
-use bevy::{
-    prelude::{Commands, Transform},
-    transform::TransformBundle,
-};
-use bevy_rapier2d::prelude::{Collider, GravityScale, LockedAxes, RigidBody};
-
 use self::movement::player_movement;
 
 mod movement;

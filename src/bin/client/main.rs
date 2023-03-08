@@ -3,10 +3,12 @@ mod helpers;
 mod network;
 
 use bevy::{log, prelude::*};
+use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use bevy_rapier2d::prelude::*;
 use bevy_renet::{renet::RenetClient, run_if_client_connected};
 
 use network::NetworkPlugin;
+use tiled_game::components::Threat;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 enum AppState {
@@ -17,6 +19,7 @@ enum AppState {
 fn main() {
     App::new()
         // .insert_resource(ScheduleRunnerSettings::run_loop(Duration::from_millis(120)))
+        .register_type::<Threat>()
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
@@ -33,6 +36,7 @@ fn main() {
                     ..default()
                 }),
         )
+        .add_plugin(WorldInspectorPlugin)
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
         .add_plugin(RapierDebugRenderPlugin::default())
         .add_plugin(game::GamePlugin)

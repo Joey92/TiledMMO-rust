@@ -1,7 +1,4 @@
-use bevy::prelude::{Component};
-
-#[derive(Debug, Component)]
-pub struct Name(pub String);
+use bevy::prelude::Component;
 
 // Entities with this component are controlled by another player
 #[derive(Debug, Component)]

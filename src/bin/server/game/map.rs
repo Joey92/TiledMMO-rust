@@ -5,22 +5,18 @@ use std::{
 
 use bevy::{
     log,
-    prelude::{
-        Added, BuildChildren, Changed, Children, Commands, Component, DespawnRecursiveExt, Entity,
-        EventReader, EventWriter, Or, Parent, Plugin, Query, Res, ResMut, Resource, SpatialBundle,
-        Transform, With,
-    },
+    prelude::*,
     time::{Time, Timer, TimerMode},
 };
 use tiled::{Loader, Map as TiledMap};
-use tiled_game::{
-    network::messages::server::ServerMessages,
-    shared_components::{Name, Player},
+use tiled_game::network::messages::server::ServerMessages;
+
+use crate::{
+    game::npc::{Friendly, NPCBundle},
+    network::{NetworkClientId, SendServerMessageEvent},
 };
 
-use crate::network::{NetworkClientId, SendServerMessageEvent};
-
-use super::scripts::handle_add_script;
+use super::{player::Player, scripts::handle_add_script};
 
 #[derive(Component, Debug)]
 pub struct MapName(pub String);
@@ -70,6 +66,8 @@ pub struct MapsPlugin;
 impl Plugin for MapsPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_startup_system(map_manager)
+            // Handle despawn of entities
+            .add_event::<DespawnEvent>()
             // removes map instances with no players in certain intervals
             .add_system(map_instance_cleanup)
             // teleports players between map instances
@@ -77,12 +75,7 @@ impl Plugin for MapsPlugin {
             // sends all units to the client
             .add_system(send_map_instance_entities)
             // Spawns NPCs on new map instances
-            .add_system(spawn_units)
-            // Handle despawn of entities
-            .add_event::<DespawnEvent>() // we use an event to despawn entities
-            .add_system(send_despawn_event)
-            // Updates movement of entities
-            .add_system(send_movement);
+            .add_system(spawn_units);
 
         #[cfg(feature = "verbose-output")]
         {
@@ -181,6 +174,12 @@ fn map_instance_cleanup(
         .retain(|instance| instance_in_use.contains(instance));
 }
 
+// Despawns an entity on the client side
+pub struct DespawnEvent {
+    pub entity: Entity,
+    pub map: Entity,
+}
+
 fn map_change_handler(
     mut commands: Commands,
     mut map_manager: ResMut<MapManager>,
@@ -263,7 +262,7 @@ fn map_change_handler(
         commands
             .entity(player_entity)
             .remove::<Teleport>()
-            .insert(map_change_request.position.clone());
+            .insert(map_change_request.position);
 
         // send map change event to client
         // so it can load the new map
@@ -277,42 +276,6 @@ fn map_change_handler(
     }
 }
 
-struct DespawnEvent {
-    entity: Entity,
-    map: Entity,
-}
-
-// Sends a despawn message to each player on the map
-// When a player or entity leaves the map
-fn send_despawn_event(
-    mut server_message: EventWriter<SendServerMessageEvent>,
-    mut despawn_events: EventReader<DespawnEvent>,
-    all_players: Query<
-        (
-            Entity,
-            &NetworkClientId,
-            &Parent, /* Map Instances Entity */
-        ),
-        With<Player>,
-    >,
-) {
-    for despawn in despawn_events.iter() {
-        // get players on the map
-        all_players
-            .iter()
-            .filter(|(_, _, map_instance_entity)| map_instance_entity.get() == despawn.map)
-            .for_each(|(_, client_id, _)| {
-                // send despawn event to all players in map
-                server_message.send(SendServerMessageEvent {
-                    client_id: Some(client_id.0),
-                    message: ServerMessages::Despawn {
-                        entity: despawn.entity,
-                    },
-                });
-            });
-    }
-}
-
 // Spawn units for each newly created map instance
 fn spawn_units(
     mut commands: Commands,
@@ -320,7 +283,7 @@ fn spawn_units(
     map_manager: Res<MapManager>,
 ) {
     for (map_instance_entity, map_name) in query.iter() {
-        map_manager.atlas.get(&map_name.0).map(|map| {
+        if let Some(map) = map_manager.atlas.get(&map_name.0) {
             map.layers()
                 .flat_map(|layer| {
                     // match as ObjectLayer and give back Result
@@ -335,15 +298,19 @@ fn spawn_units(
                     _ => None,
                 })
                 .for_each(|obj| {
-                    println!("Spawning unit {:?}", obj.name);
                     let mut cmd = commands.spawn_empty();
 
-                    cmd.insert(Name(obj.name.clone()))
-                        .insert(MapInstanceEntity(map_instance_entity))
-                        .insert(SpatialBundle {
-                            transform: Transform::from_xyz(obj.x, obj.y, 0.),
-                            ..Default::default()
-                        });
+                    let spawn_point = Transform::from_xyz(
+                        obj.x,
+                        // flipping the y coordinate to match bevy's coordinate system
+                        -obj.y + (map.height * map.tile_height) as f32,
+                        1.,
+                    );
+
+                    cmd.insert((
+                        NPCBundle::new(obj.name.to_owned(), spawn_point),
+                        MapInstanceEntity(map_instance_entity),
+                    ));
 
                     obj.properties.get("script").map(|script| match script {
                         tiled::PropertyValue::StringValue(script_name) => {
@@ -352,11 +319,22 @@ fn spawn_units(
                         _ => {}
                     });
 
+                    obj.properties.get("friendly").map(|script| match script {
+                        tiled::PropertyValue::BoolValue(friendly) => {
+                            if *friendly {
+                                cmd.insert(Friendly);
+                            }
+                        }
+                        _ => {}
+                    });
+
                     let id = cmd.id();
+
+                    println!("Spawning unit {:?} ({:?})", obj.name, id);
 
                     commands.entity(map_instance_entity).push_children(&[id]);
                 });
-        });
+        }
     }
 }
 
@@ -374,37 +352,17 @@ fn send_map_instance_entities(
         let npc = map_instances.get(current_map_instance.get()).ok();
 
         if let Some(npc_list) = npc {
+            println!("Sending entity list to client {:?}", client_id.0);
             server_messages.send(SendServerMessageEvent {
                 client_id: Some(client_id.0),
                 message: ServerMessages::EntityList {
                     entities: npc_list
                         .iter()
-                        .filter(|e| &player_entity != *e) // remove the player entity from the list
-                        .map(|e| *e)
+                        .filter(|e| &player_entity != *e)
+                        .copied()
                         .collect(),
                 },
             });
-        }
-    }
-}
-
-fn send_movement(
-    mut server_messages: EventWriter<SendServerMessageEvent>,
-    moved_entities: Query<(Entity, &Transform, &Parent), Changed<Transform>>,
-    players: Query<(Entity, &Parent, &NetworkClientId)>,
-) {
-    for (moved_entity, transform, map_instance) in moved_entities.iter() {
-        for (player_entity, player_map_instance, client_id) in players.iter() {
-            if player_map_instance.get() == map_instance.get() && player_entity != moved_entity {
-                server_messages.send(SendServerMessageEvent {
-                    client_id: Some(client_id.0),
-                    message: ServerMessages::Move {
-                        entity: player_entity,
-                        x: transform.translation.x,
-                        y: transform.translation.y,
-                    },
-                });
-            }
         }
     }
 }

@@ -1,21 +1,23 @@
 use bevy::{
     log,
-    prelude::{Added, AssetEvent, Assets, Commands, EventReader, Handle, Query, Res, Transform},
+    prelude::{
+        Added, AssetEvent, Assets, Commands, EventReader, Handle, Name, Query, Res, Transform,
+    },
     transform::TransformBundle,
 };
 use bevy_rapier2d::prelude::Collider;
-use tiled::{LayerType, Object, ObjectShape};
+use tiled::{LayerType, ObjectShape};
 
 use crate::game::map::tiled::MapName;
 
-use super::tiled::{CurrentlyActiveMapName, TiledMap};
+use super::tiled::{CurrentMap, TiledMap};
 
 /**
  * Calculate collisions when a new tilemap gets loaded
  */
 pub fn load_collision(
     maps: Res<Assets<TiledMap>>,
-    map_name: Res<CurrentlyActiveMapName>,
+    map_name: Res<CurrentMap>,
     mut map_events: EventReader<AssetEvent<TiledMap>>,
     loaded_maps: Query<&Handle<TiledMap>, Added<Handle<TiledMap>>>,
     mut commands: Commands,
@@ -54,14 +56,13 @@ pub fn load_collision(
 
                 map.layers()
                     .find(|layer| layer.name == "collision")
-                    .map(|layer| {
+                    .and_then(|layer| {
                         // match as ObjectLayer and give back Result
                         match layer.layer_type() {
                             LayerType::ObjectLayer(layer) => Some(layer),
                             _ => None,
                         }
                     })
-                    .flatten()
                     .map(|layer| layer.objects())
                     .expect("No collision layer found")
                     .for_each(|object| match object.shape {
@@ -71,15 +72,12 @@ pub fn load_collision(
                             commands
                                 .spawn(Collider::cuboid(width / 2., height / 2.))
                                 .insert(TransformBundle::from(Transform::from_xyz(
-                                    (object.x + width / 2.)
-                                        - map.tile_width as f32 / 2.
-                                        - (map.width / 2 * map.tile_width) as f32,
-                                    ((map.height / 2 * map.tile_height) as f32 - object.y)
-                                        - height / 2.
-                                        - map.tile_height as f32 / 2.,
+                                    object.x + width / 2.,
+                                    (-object.y - height / 2.)
+                                        + (map.height * map.tile_height) as f32,
                                     0.0,
                                 )))
-                                .insert(MapName(map_name.0.clone()));
+                                .insert((MapName(map_name.name.clone()), Name::new("Collider")));
                         }
                         _ => {}
                     })

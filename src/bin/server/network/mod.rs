@@ -1,22 +1,26 @@
+mod sync_systems;
+
 use std::{net::UdpSocket, time::SystemTime};
 
-use bevy::{
-    app::AppExit,
-    prelude::{
-        App, Commands, Component, CoreStage, DespawnRecursiveExt, Entity, EventReader, EventWriter,
-        Events, Plugin, Query, ResMut, Resource, Transform, World,
-    },
-};
+use bevy::{app::AppExit, prelude::*};
 use bevy_renet::{
     renet::{RenetServer, ServerAuthentication, ServerConfig, ServerEvent},
     RenetServerPlugin,
 };
 use tiled_game::{
+    components::*,
     network::{
         messages::{client::ClientMessages, server::ServerMessages},
         server_connection_config, ClientChannel, ServerChannel, PROTOCOL_ID,
     },
-    shared_components::{Name, Player},
+};
+
+use sync_systems::*;
+
+use crate::game::{
+    npc::Friendly,
+    player::{LoggingOut, Player},
+    unit::Target,
 };
 
 #[derive(Component, Debug)]
@@ -41,11 +45,26 @@ impl Plugin for NetworkPlugin {
             .add_plugin(RenetServerPlugin::default())
             .insert_resource(new_renet_server())
             .insert_resource(NetworkResource::default())
-            // Receive Server Events
-            .add_system_to_stage(CoreStage::PreUpdate, handle_server_events)
-            .add_system(handle_client_messages)
             .add_event::<SendServerMessageEvent>()
-            .add_system_to_stage(CoreStage::PostUpdate, send_message_system)
+            .add_system_set(
+                SystemSet::new()
+                    .with_system(send_movement)
+                    .with_system(send_despawn)
+                    .with_system(send_vitals_changed)
+                    .with_system(send_death_events)
+                    .with_system(send_threat)
+                    .with_system(send_entered_combat)
+                    .with_system(send_spawn)
+                    .with_system(send_exit_combat)
+                    .label("ecs_sync"),
+            )
+            // Receive Server Events
+            .add_system_to_stage(CoreStage::PreUpdate, handle_connection_events)
+            .add_system_to_stage(
+                CoreStage::PreUpdate,
+                handle_client_messages.after(handle_connection_events),
+            )
+            .add_system(send_message_system.after("ecs_sync"))
             .add_event::<SendEntityInfoEvent>()
             .add_system(handle_entity_info_system)
             .add_system(disconnect_clients_on_exit);
@@ -79,7 +98,7 @@ pub fn new_renet_server() -> RenetServer {
         .expect("Failed to create server")
 }
 
-fn handle_server_events(
+fn handle_connection_events(
     mut commands: Commands,
     mut client_entities: ResMut<NetworkResource>,
     mut connection_events: EventReader<ServerEvent>,
@@ -96,16 +115,19 @@ fn handle_server_events(
 
                 server_message_events.send(SendServerMessageEvent {
                     client_id: Some(*id),
-                    message: ServerMessages::EntityAssignment { entity },
+                    message: ServerMessages::PlayerInfo {
+                        entity,
+                        translation: Vec3::new(0., 0., 3.),
+                    },
                 });
             }
             ServerEvent::ClientDisconnected(id) => {
                 println!("Client disconnected: {}", id);
                 let client = client_entities.player_entity_map.remove(id);
 
-                client.map(|entity| {
-                    commands.entity(entity).despawn_recursive();
-                });
+                if let Some(entity) = client {
+                    commands.entity(entity).insert(LoggingOut);
+                }
             }
         }
     }
@@ -119,23 +141,41 @@ struct SendEntityInfoEvent {
 fn handle_entity_info_system(
     mut events: EventReader<SendEntityInfoEvent>,
     mut server_message: EventWriter<SendServerMessageEvent>,
-    entities: Query<(&Name, &Transform, Option<&Player>)>,
+    entities: Query<(
+        &Name,
+        &Transform,
+        &Health,
+        &MaxHealth,
+        &Mana,
+        &MaxMana,
+        Option<&Player>,
+        Option<&Friendly>,
+        Option<&Threat>,
+    )>,
 ) {
     for event in events.iter() {
         let entity = event.entity;
         let entity_ref = entities.get(entity).ok();
 
         let event = match entity_ref {
-            Some((name, transform, player)) => SendServerMessageEvent {
-                client_id: Some(event.client_id),
-                message: ServerMessages::EntityInfo {
-                    entity,
-                    x: transform.translation.x,
-                    y: transform.translation.y,
-                    name: name.0.clone(),
-                    is_player: player.is_some(),
-                },
-            },
+            Some((name, transform, health, max_health, mana, max_mana, player, friend, threat)) => {
+                SendServerMessageEvent {
+                    client_id: Some(event.client_id),
+                    message: ServerMessages::EntityInfo {
+                        entity,
+                        x: transform.translation.x,
+                        y: transform.translation.y,
+                        name: name.to_string(),
+                        is_player: player.is_some(),
+                        friendly: friend.is_some(),
+                        health: health.0,
+                        max_health: max_health.0,
+                        mana: mana.0,
+                        max_mana: max_mana.0,
+                        threat: threat.map(|t| Some(t.0.clone())).unwrap_or(None),
+                    },
+                }
+            }
             _ => {
                 // entity doesn't exist.. send a despawn message
                 SendServerMessageEvent {
@@ -158,17 +198,31 @@ fn handle_client_messages(
     for client_id in server.clients_id().into_iter() {
         while let Some(message) = server.receive_message(client_id, ClientChannel::Input) {
             let message: ClientMessages = bincode::deserialize(&message).unwrap();
-            println!("Received message from client {}: {:?}", client_id, message);
+            // println!("Received message from client {}: {:?}", client_id, message);
             if let Some(entity) = client_entities.player_entity_map.get(&client_id) {
                 match message {
                     ClientMessages::Move { x, y } => {
                         commands
                             .entity(*entity)
-                            .insert(Transform::from_xyz(x, y, 0.0));
+                            .insert(Transform::from_xyz(x, y, 3.0));
                     }
-                    ClientMessages::LoadReady => todo!(),
+                    ClientMessages::Ready => todo!("Handle ready message"),
                     ClientMessages::RequestEntityInfo { entity } => {
                         entity_info_request.send(SendEntityInfoEvent { client_id, entity });
+                    }
+                    ClientMessages::Disconnect => {
+                        // todo: handle remove children on map instance
+                        commands.entity(*entity).insert(LoggingOut);
+                    }
+
+                    // user selected or unselected a target
+                    ClientMessages::Target { target } => {
+                        if let Some(target_entity) = target {
+                            commands.entity(*entity).insert(Target(target_entity));
+                            continue;
+                        }
+
+                        commands.entity(*entity).remove::<Target>();
                     }
                 }
             }
@@ -178,6 +232,11 @@ fn handle_client_messages(
 
 fn disconnect_clients_on_exit(exit: EventReader<AppExit>, mut server: ResMut<RenetServer>) {
     if !exit.is_empty() {
+        let msg = ServerMessages::Disconnect {
+            reason: tiled_game::network::messages::server::DisconnectionReason::ServerShutdown,
+        };
+        let disconnect_msg = bincode::serialize(&msg).unwrap();
+        server.broadcast_message(ServerChannel::ServerMessages, disconnect_msg);
         server.disconnect_clients();
     }
 }

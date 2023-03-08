@@ -12,23 +12,18 @@
 //   * When the 'atlas' feature is enabled tilesets using a collection of images will be skipped.
 //   * Only finite tile layers are loaded. Infinite tile layers and object layers will be skipped.
 
-use std::{fmt::format, io::BufReader};
+use std::io::BufReader;
 
 use bevy::{
     asset::{AssetLoader, AssetPath, LoadedAsset},
     log,
-    prelude::{
-        Added, AssetEvent, AssetServer, Assets, Bundle, Commands, Component, DespawnRecursiveExt,
-        Entity, EventReader, GlobalTransform, Handle, Image, Name, Query, Res, Resource, Transform,
-        Vec3,
-    },
+    prelude::*,
     reflect::TypeUuid,
     utils::HashMap,
 };
 use bevy_ecs_tilemap::prelude::*;
 
 use anyhow::Result;
-use tiled_game::shared_components::Player;
 
 #[derive(TypeUuid)]
 #[uuid = "e51081d0-6168-4881-a1c6-4249b2000d7f"]
@@ -147,7 +142,10 @@ impl AssetLoader for TiledLoader {
 }
 
 #[derive(Resource, Default)]
-pub struct CurrentlyActiveMapName(pub String);
+pub struct CurrentMap {
+    pub name: String,
+    pub player_plane_z: Option<i8>,
+}
 
 /**
  * Insert this component to every entity that should be unloaded on a map change.
@@ -158,7 +156,7 @@ pub struct MapName(pub String);
 // This system removes all entities with the MapName component that do not match the currently active map.
 pub fn unload_map(
     mut commands: Commands,
-    current_map_name: Res<CurrentlyActiveMapName>,
+    current_map_name: Res<CurrentMap>,
     map_entities: Query<(Entity, &MapName)>,
 ) {
     if !current_map_name.is_changed() {
@@ -166,7 +164,7 @@ pub fn unload_map(
     }
 
     for (layer_entity, map_name) in map_entities.iter() {
-        if map_name.0 == current_map_name.0 {
+        if map_name.0 == current_map_name.name {
             continue;
         }
 
@@ -181,7 +179,7 @@ pub fn unload_map(
 pub fn process_loaded_maps(
     mut commands: Commands,
     mut map_events: EventReader<AssetEvent<TiledMap>>,
-    currently_active_map: Res<CurrentlyActiveMapName>,
+    currently_active_map: Res<CurrentMap>,
     maps: Res<Assets<TiledMap>>,
     tile_storage_query: Query<(Entity, &TileStorage)>,
     mut map_query: Query<(&Handle<TiledMap>, &mut TiledLayersStorage)>,
@@ -217,6 +215,7 @@ pub fn process_loaded_maps(
             if map_handle != changed_map {
                 continue;
             }
+
             if let Some(tiled_map) = maps.get(map_handle) {
                 // TODO: Create a RemoveMap component..
                 for layer_entity in layer_storage.storage.values() {
@@ -308,13 +307,12 @@ pub fn process_loaded_maps(
                                 let mapped_x = x as i32;
                                 let mapped_y = mapped_y as i32;
 
-                                let layer_tile =
-                                    match layer_data.get_tile(mapped_x as i32, mapped_y as i32) {
-                                        Some(t) => t,
-                                        None => {
-                                            continue;
-                                        }
-                                    };
+                                let layer_tile = match layer_data.get_tile(mapped_x, mapped_y) {
+                                    Some(t) => t,
+                                    None => {
+                                        continue;
+                                    }
+                                };
                                 if tileset_index != layer_tile.tileset_index() {
                                     continue;
                                 }
@@ -349,10 +347,13 @@ pub fn process_loaded_maps(
                                         },
                                         ..Default::default()
                                     })
+                                    .insert(Name::new("Tile"))
                                     .id();
                                 tile_storage.set(&tile_pos, tile_entity);
                             }
                         }
+
+                        
 
                         commands
                             .entity(layer_entity)
@@ -367,12 +368,23 @@ pub fn process_loaded_maps(
                                     &map_size,
                                     &grid_size,
                                     &map_type,
+                                    // this will draw each layer on z index 0, 2, 4, etc.
+                                    // this allows us to draw units on top of the tilemap
+                                    // the units mut be drawn on z index 1, 3, 5, etc.
+                                    // so z * 2 - 1
                                     layer_index as f32,
-                                ) * Transform::from_xyz(offset_x, -offset_y, 0.0),
+                                ) * Transform::from_xyz(
+                                    (offset_x + map_size.x as f32 * tile_size.x + tile_size.x) / 2.,
+                                    (offset_y + map_size.y as f32 * tile_size.y + tile_size.y) / 2.,
+                                    0.,
+                                ),
                                 map_type,
                                 ..Default::default()
                             })
-                            .insert(MapName(currently_active_map.0.clone()));
+                            .insert((
+                                MapName(currently_active_map.name.clone()),
+                                Name::new("Tile Layer"),
+                            ));
 
                         layer_storage
                             .storage
@@ -398,7 +410,11 @@ pub fn change_map(
 ) {
     for event in map_events.iter() {
         log::info!("Changing map to {}", event.map_name);
-        commands.insert_resource(CurrentlyActiveMapName(event.map_name.clone()));
+
+        commands.insert_resource(CurrentMap {
+            name: event.map_name.clone(),
+            ..default()
+        });
 
         let map_handle: Handle<TiledMap> = asset_server.load(format!("maps/{}", event.map_name));
 

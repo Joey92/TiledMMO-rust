@@ -1,11 +1,11 @@
-use std::{net::UdpSocket, time::SystemTime};
+use std::{collections::HashMap, net::UdpSocket, time::SystemTime};
 
 use bevy::{
     app::AppExit,
+    core::Name,
     log,
     prelude::*,
     sprite::{Sprite, SpriteBundle},
-    transform::TransformBundle,
 };
 use bevy_rapier2d::prelude::*;
 use bevy_renet::{
@@ -14,9 +14,14 @@ use bevy_renet::{
 };
 use tiled_game::network::{
     client_connection_config,
-    messages::{client::ClientMessages, server::ServerMessages},
+    messages::{
+        client::ClientMessages,
+        server::{ServerMessages, Vitals},
+    },
     ClientChannel, ServerChannel, PROTOCOL_ID,
 };
+
+use tiled_game::components::*;
 
 use crate::{
     game::{
@@ -26,8 +31,6 @@ use crate::{
     },
     helpers::camera::CameraTarget,
 };
-
-use crate::game::components::Name;
 
 fn new_renet_client() -> RenetClient {
     let server_addr = "127.0.0.1:3387".parse().expect("Invalid server address");
@@ -54,9 +57,15 @@ fn panic_on_error_system(mut renet_error: EventReader<RenetError>) {
     }
 }
 
+#[derive(Debug, Component)]
+pub struct ServerSideEntity(pub Entity);
+
 #[derive(Resource, Default)]
 struct ClientState {
     player_entity: Option<Entity>,
+
+    server_client_entity_mapping:
+        HashMap<Entity /* Server side */, Entity /* client side */>,
 }
 
 pub struct NetworkPlugin;
@@ -69,10 +78,10 @@ impl Plugin for NetworkPlugin {
             .add_system_set(
                 SystemSet::new()
                     .with_run_criteria(run_if_client_connected)
-                    .with_system(handle_client_messages)
+                    .with_system(handle_server_messages)
                     .with_system(sync_movement),
             )
-            .add_system(disconnect_on_exit)
+            .add_system_to_stage(CoreStage::Last, disconnect_on_exit)
             .add_system(panic_on_error_system);
     }
 }
@@ -94,7 +103,7 @@ fn sync_movement(
     }
 }
 
-fn handle_client_messages(
+fn handle_server_messages(
     mut client: ResMut<RenetClient>,
     mut client_state: ResMut<ClientState>,
     mut commands: Commands,
@@ -113,63 +122,145 @@ fn handle_client_messages(
         log::info!("Received message from server: {:?}", server_message);
         match server_message {
             ServerMessages::Despawn { entity } => {
-                log::info!("Despawn entity: {:?}", entity);
-                commands.get_entity(entity).map(|mut e| e.despawn());
+                let client_side_entity = client_state.server_client_entity_mapping.remove(&entity);
+                if let Some(client_side_entity) = client_side_entity {
+                    log::info!("Despawn entity: {:?}", entity);
+                    commands.entity(client_side_entity).despawn_recursive();
+                }
+            }
+
+            ServerMessages::Spawn {
+                entity: server_entity,
+            } => {
+                log::info!("Spawn entity: {:?}", server_entity);
+                let client_side_entity = commands.spawn(ServerSideEntity(server_entity)).id();
+                client_state
+                    .server_client_entity_mapping
+                    .insert(server_entity, client_side_entity);
+
+                // request info about the entity
+                let msg = ClientMessages::RequestEntityInfo {
+                    entity: server_entity,
+                };
+                let msg = bincode::serialize(&msg).unwrap();
+                client.send_message(ClientChannel::Input, msg);
             }
             ServerMessages::EntityInfo {
-                entity,
+                entity: server_entity,
                 x,
                 y,
                 name,
                 is_player,
+                friendly,
+                health,
+                max_health,
+                mana,
+                max_mana,
+                threat,
             } => {
-                log::info!("Spawning entity: {:?}", entity);
+                let client_entity = client_state
+                    .server_client_entity_mapping
+                    .get(&server_entity);
 
-                // use get_or_spawn to mirror entity IDs on the server
-                let mut cmd = commands.get_or_spawn(entity);
+                if client_entity.is_none() {
+                    // maybe spawn it anyway?
+                    continue;
+                }
 
-                cmd.insert(MapName(name.clone()))
-                    .insert(TransformBundle::from(Transform::from_xyz(x, y, 6.0)))
-                    .insert(Name(name))
-                    .insert(SpriteBundle {
+                let mut cmd = commands.entity(*client_entity.unwrap());
+
+                let color = if friendly {
+                    Color::rgb(0.25, 0.75, 0.25)
+                } else {
+                    Color::rgb(0.75, 0.25, 0.25)
+                };
+
+                cmd.insert((
+                    MapName(name.clone()),
+                    Name::new(name),
+                    SpriteBundle {
+                        transform: Transform::from_xyz(x, y, 1.),
                         sprite: Sprite {
-                            color: Color::rgb(0.25, 0.25, 0.75),
+                            color,
                             custom_size: Some(Vec2::new(50.0, 100.0)),
                             ..default()
                         },
                         ..default()
-                    });
+                    },
+                    Health(health),
+                    MaxHealth(max_health),
+                    Mana(mana),
+                    MaxMana(max_mana),
+                    Threat(threat.unwrap_or(ThreatMap::default())),
+                ));
 
                 if is_player {
                     cmd.insert(PlayerEntity);
                 }
             }
-            ServerMessages::Move { entity, x, y } => {
-                log::info!("Move entity: {:?}", entity);
-                let cmd = commands.get_entity(entity);
+            ServerMessages::Move {
+                entity: server_entity,
+                pos,
+            } => {
+                let client_side_entity = client_state
+                    .server_client_entity_mapping
+                    .get(&server_entity);
 
-                if let Some(mut entity) = cmd {
-                    entity.insert(Transform::from_xyz(x, y, 0.0));
+                if let Some(client_side_entity) = client_side_entity {
+                    log::info!("Move entity: {:?}", server_entity);
+                    commands
+                        .entity(*client_side_entity)
+                        .insert(Transform::from_translation(pos));
                 }
             }
-            ServerMessages::EntityAssignment { entity } => {
-                client_state.player_entity = Some(entity);
-                commands
-                    .spawn(RigidBody::KinematicPositionBased)
-                    .insert(GravityScale(0.0))
-                    .insert(LockedAxes::ROTATION_LOCKED)
-                    .insert(TransformBundle::from(Transform::from_xyz(0., 0., 1.0)))
-                    .insert(Collider::cuboid(20., 20.))
-                    .insert(Player)
-                    .insert(CameraTarget);
+            ServerMessages::PlayerInfo {
+                entity: server_entity,
+                translation,
+            } => {
+                client_state.player_entity = Some(server_entity);
+                let client_entity = commands
+                    .spawn((
+                        RigidBody::Dynamic,
+                        GravityScale(0.0),
+                        Restitution {
+                            coefficient: 0.,
+                            combine_rule: CoefficientCombineRule::Min,
+                        },
+                        LockedAxes::ROTATION_LOCKED,
+                        SpriteBundle {
+                            transform: Transform::from_translation(translation),
+                            sprite: Sprite {
+                                color: Color::rgb(0., 0.25, 0.75),
+                                custom_size: Some(Vec2::new(40.0, 40.0)),
+                                ..default()
+                            },
+                            ..default()
+                        },
+                        Collider::cuboid(20., 20.),
+                        Player,
+                        Name::new("player"),
+                        CameraTarget,
+                    ))
+                    .id();
+
+                client_state
+                    .server_client_entity_mapping
+                    .insert(server_entity, client_entity);
             }
-            ServerMessages::EntityList { entities } => {
-                for entity in entities {
+            ServerMessages::EntityList {
+                entities: server_entities,
+            } => {
+                for server_entity in server_entities {
                     // use get_or_spawn to mirror entity IDs on the server
-                    commands.get_or_spawn(entity);
+                    let client_entity = commands.spawn(ServerSideEntity(server_entity)).id();
+                    client_state
+                        .server_client_entity_mapping
+                        .insert(server_entity, client_entity);
 
                     // request info about the entity
-                    let msg = ClientMessages::RequestEntityInfo { entity };
+                    let msg = ClientMessages::RequestEntityInfo {
+                        entity: server_entity,
+                    };
                     let msg = bincode::serialize(&msg).unwrap();
                     client.send_message(ClientChannel::Input, msg);
                 }
@@ -182,12 +273,73 @@ fn handle_client_messages(
                     player.single_mut().0.translation = position;
                 }
             }
+            ServerMessages::Vitals {
+                entity: server_entity,
+                vital,
+            } => {
+                let client_entity = client_state
+                    .server_client_entity_mapping
+                    .get(&server_entity);
+
+                if let Some(client_entity) = client_entity {
+                    match vital {
+                        Vitals::Health(health) => {
+                            commands.entity(*client_entity).insert(Health(health));
+                        }
+                        Vitals::Mana(mana) => {
+                            commands.entity(*client_entity).insert(Mana(mana));
+                        }
+                        Vitals::Dead(is_dead) => {
+                            if is_dead {
+                                commands.entity(*client_entity).insert(Dead);
+                                continue;
+                            }
+                            commands.entity(*client_entity).remove::<Dead>();
+                        }
+                    }
+                }
+            }
+            ServerMessages::Threat {
+                entity: server_entity,
+                threat,
+            } => {
+                let client_entity = client_state
+                    .server_client_entity_mapping
+                    .get(&server_entity);
+
+                if let Some(client_entity) = client_entity {
+                    commands.entity(*client_entity).insert(Threat(threat));
+                }
+            }
+            ServerMessages::CombatState {
+                entity: server_entity,
+                in_combat,
+            } => {
+                let client_entity = client_state
+                    .server_client_entity_mapping
+                    .get(&server_entity);
+
+                if let Some(client_entity) = client_entity {
+                    if in_combat {
+                        commands.entity(*client_entity).insert(InCombat);
+                        continue;
+                    }
+
+                    commands.entity(*client_entity).remove::<InCombat>();
+                }
+            }
+            ServerMessages::Disconnect { reason } => {
+                panic!("Disconnected from server: {:?}", reason)
+            }
         }
     }
 }
 
-fn disconnect_on_exit(exit: EventReader<AppExit>, mut server: ResMut<RenetClient>) {
+fn disconnect_on_exit(exit: EventReader<AppExit>, mut client: ResMut<RenetClient>) {
     if !exit.is_empty() {
-        server.disconnect();
+        let msg = ClientMessages::Disconnect;
+        let msg = bincode::serialize(&msg).unwrap();
+        client.send_message(ClientChannel::Input, msg);
+        client.disconnect();
     }
 }

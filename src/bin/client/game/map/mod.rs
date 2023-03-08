@@ -15,7 +15,7 @@ impl Plugin for MapPlugin {
         app.add_asset::<TiledMap>()
             .add_plugin(TilemapPlugin)
             .add_asset_loader(TiledLoader)
-            .init_resource::<CurrentlyActiveMapName>()
+            .init_resource::<CurrentMap>()
             .add_event::<MapChangeEvent>()
             .add_system(change_map)
             .add_system(process_loaded_maps)

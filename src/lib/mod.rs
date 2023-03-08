@@ -1,2 +1,2 @@
-pub mod shared_components;
+pub mod components;
 pub mod network;

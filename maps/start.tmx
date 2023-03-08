@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<map version="1.9" tiledversion="1.9.2" orientation="orthogonal" renderorder="left-up" width="30" height="20" tilewidth="32" tileheight="32" infinite="0" nextlayerid="7" nextobjectid="15">
+<map version="1.9" tiledversion="1.9.2" orientation="orthogonal" renderorder="left-up" width="30" height="20" tilewidth="32" tileheight="32" infinite="0" nextlayerid="8" nextobjectid="16">
  <properties>
   <property name="global_instance" type="bool" value="true"/>
  </properties>
@@ -96,6 +96,12 @@
   <object id="14" name="Mob" x="667.928" y="165.45">
    <properties>
     <property name="script" value="follower"/>
+   </properties>
+   <point/>
+  </object>
+  <object id="15" name="Friendly Mob" x="346.401" y="207.413">
+   <properties>
+    <property name="friendly" type="bool" value="true"/>
    </properties>
    <point/>
   </object>

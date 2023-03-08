@@ -6,9 +6,9 @@ This project is a client and server combo tiled map multiplayer/MMO game engine.
 
 Some features (Compared with the port of the [TiledMMO](https://github.com/Joey92/TiledMMO) project) include:
 
-- [ ] Multiplayer support
+- [x] Multiplayer support
 - [x] NPCs via object layer
-  - [ ] properties on the objects configure how the NPC behaves
+  - [x] properties on the objects configure how the NPC behaves
 - [ ] NPC navigation via navmesh
 - [ ] Portals to other maps
 - [ ] Full scripting support
@@ -26,6 +26,8 @@ To start the server run `cargo run --bin server`
 And for the client run `cargo run --bin client`
 
 The ports are not really configurable yet, and the server and client are both assumed to be running on localhost.
+
+To test the multiplayer aspect just start the client twice!
 
 ## Server / Client
 
