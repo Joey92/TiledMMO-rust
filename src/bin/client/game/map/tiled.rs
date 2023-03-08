@@ -170,6 +170,8 @@ pub fn unload_map(
 
         commands.entity(layer_entity).despawn_recursive();
     }
+
+    info!("Unloaded previous map entities");
 }
 
 /*
@@ -353,38 +355,34 @@ pub fn process_loaded_maps(
                             }
                         }
 
-                        
-
-                        commands
-                            .entity(layer_entity)
-                            .insert(TilemapBundle {
+                        commands.entity(layer_entity).insert((
+                            TilemapBundle {
                                 grid_size,
                                 size: map_size,
                                 storage: tile_storage,
                                 texture: tilemap_texture.clone(),
                                 tile_size,
                                 spacing: tile_spacing,
-                                transform: get_tilemap_center_transform(
-                                    &map_size,
-                                    &grid_size,
-                                    &map_type,
-                                    // this will draw each layer on z index 0, 2, 4, etc.
-                                    // this allows us to draw units on top of the tilemap
-                                    // the units mut be drawn on z index 1, 3, 5, etc.
-                                    // so z * 2 - 1
-                                    layer_index as f32,
-                                ) * Transform::from_xyz(
-                                    (offset_x + map_size.x as f32 * tile_size.x + tile_size.x) / 2.,
-                                    (offset_y + map_size.y as f32 * tile_size.y + tile_size.y) / 2.,
-                                    0.,
+                                transform: Transform::from_xyz(
+                                    offset_x + tile_size.x / 2., //(offset_x + map_size.x as f32 * tile_size.x + tile_size.x) / 2.,
+                                    offset_y + tile_size.y / 2., //(offset_y + map_size.y as f32 * tile_size.y + tile_size.y) / 2.,
+                                    layer.user_type.as_ref().map_or_else(
+                                        || layer_index as f32,
+                                        |class| {
+                                            if class == "Ground" {
+                                                layer_index as f32 * 0.01 // ground layers are between 0 and 1
+                                            } else {
+                                                (layer_index * 2) as f32 // other layers are above 2 so units can use z index between 1 and 2
+                                            }
+                                        },
+                                    ),
                                 ),
                                 map_type,
                                 ..Default::default()
-                            })
-                            .insert((
-                                MapName(currently_active_map.name.clone()),
-                                Name::new("Tile Layer"),
-                            ));
+                            },
+                            MapName(currently_active_map.name.clone()),
+                            Name::new("Tile Layer"),
+                        ));
 
                         layer_storage
                             .storage
