@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use tiled_game::{
-    calc_z_pos,
     components::*,
     network::messages::server::{ServerMessages, Vitals},
 };
@@ -189,6 +188,7 @@ pub fn send_entity_info(
         Option<&Player>,
         Option<&Friendly>,
         Option<&Threat>,
+        Option<&Interactable>,
     )>,
 ) {
     for event in events.iter() {
@@ -196,23 +196,33 @@ pub fn send_entity_info(
         let entity_ref = entities.get(entity).ok();
 
         let event = match entity_ref {
-            Some((name, transform, health, max_health, mana, max_mana, player, friend, threat)) => {
-                SendServerMessageEvent {
-                    client_id: Some(event.client_id),
-                    message: ServerMessages::EntityInfo {
-                        entity,
-                        pos: transform.translation,
-                        name: name.to_string(),
-                        is_player: player.is_some(),
-                        friendly: friend.is_some(),
-                        health: health.0,
-                        max_health: max_health.0,
-                        mana: mana.0,
-                        max_mana: max_mana.0,
-                        threat: threat.map(|t| Some(t.0.clone())).unwrap_or(None),
-                    },
-                }
-            }
+            Some((
+                name,
+                transform,
+                health,
+                max_health,
+                mana,
+                max_mana,
+                player,
+                friend,
+                threat,
+                interactable,
+            )) => SendServerMessageEvent {
+                client_id: Some(event.client_id),
+                message: ServerMessages::EntityInfo {
+                    entity,
+                    pos: transform.translation,
+                    name: name.to_string(),
+                    is_player: player.is_some(),
+                    friendly: friend.is_some(),
+                    health: health.0,
+                    max_health: max_health.0,
+                    mana: mana.0,
+                    max_mana: max_mana.0,
+                    threat: threat.map(|t| Some(t.0.clone())).unwrap_or(None),
+                    interactable: interactable.is_some(),
+                },
+            },
             _ => {
                 // entity doesn't exist.. send a despawn message
                 SendServerMessageEvent {
@@ -245,24 +255,16 @@ pub fn send_death_events(
 pub fn send_vitals_changed(
     mut server_messages: EventWriter<SendServerMessageEvent>,
     vitals_changed: Query<
-        (
-            Entity,
-            &Parent,
-            &Health,
-            ChangeTrackers<Health>,
-            &Mana,
-            ChangeTrackers<Mana>,
-        ),
+        (Entity, &Parent, Ref<Health>, Ref<Mana>),
         Or<(Changed<Health>, Changed<Mana>)>,
     >,
     players: Query<(&Parent, &NetworkClientId)>,
 ) {
-    for (entity, map_instance, health, health_tracker, mana, mana_tracker) in vitals_changed.iter()
-    {
+    for (entity, map_instance, health, mana) in vitals_changed.iter() {
         for (player_map_instance, client_id) in players.iter() {
             // If player and entity parents match, they are on the same map instance
             if player_map_instance.get() == map_instance.get() {
-                if health_tracker.is_changed() {
+                if health.is_changed() {
                     server_messages.send(SendServerMessageEvent {
                         client_id: Some(client_id.0),
                         message: ServerMessages::Vitals {
@@ -272,7 +274,7 @@ pub fn send_vitals_changed(
                     });
                 }
 
-                if mana_tracker.is_changed() {
+                if mana.is_changed() {
                     server_messages.send(SendServerMessageEvent {
                         client_id: Some(client_id.0),
                         message: ServerMessages::Vitals {

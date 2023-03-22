@@ -9,7 +9,8 @@ use tiled_game::components::*;
 
 use super::{
     npc::{Evading, Home, NPC},
-    unit::{AttackSpeed, Target, Unit},
+    unit::{AttackSpeed, Unit},
+    SystemLabels,
 };
 
 const COMBAT_RANGE: f32 = 20.0;
@@ -36,15 +37,17 @@ impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<DoDamageEvent>()
             .add_event::<LeaveCombatEvent>()
-            .add_system(auto_attack_system.before("damage"))
-            .add_system(do_damage_system.label("damage"))
-            .add_system(remove_unreachable_targets_from_threat.after("damage"))
-            .add_system(remove_dead_from_threat.after("damage"))
-            .add_system(increase_threat_on_damage.after("damage"))
-            .add_system_to_stage(
-                CoreStage::PostUpdate,
-                leave_combat.after("damage").label("combat"),
-            );
+            .add_system(do_damage_system.in_set(SystemLabels::Damage))
+            .add_system(auto_attack_system.before(SystemLabels::Damage))
+            .add_systems(
+                (
+                    remove_unreachable_targets_from_threat,
+                    remove_dead_from_threat,
+                    increase_threat_on_damage,
+                )
+                    .after(SystemLabels::Damage),
+            )
+            .add_system(leave_combat.in_base_set(CoreSet::PostUpdate));
     }
 }
 

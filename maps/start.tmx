@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<map version="1.9" tiledversion="1.9.2" orientation="orthogonal" renderorder="left-up" width="30" height="20" tilewidth="32" tileheight="32" infinite="0" nextlayerid="10" nextobjectid="16">
+<map version="1.9" tiledversion="1.9.2" orientation="orthogonal" renderorder="left-up" width="30" height="20" tilewidth="32" tileheight="32" infinite="0" nextlayerid="11" nextobjectid="18">
  <properties>
   <property name="global_instance" type="bool" value="true"/>
  </properties>
@@ -8,7 +8,7 @@
  <tileset firstgid="321" source="tilesets/structures.tsx"/>
  <tileset firstgid="577" source="tilesets/stone-ground.tsx"/>
  <tileset firstgid="641" source="tilesets/props.tsx"/>
- <layer id="1" name="Ground" class="Ground" width="30" height="20" visible="0">
+ <layer id="1" name="Ground" class="Ground" width="30" height="20">
   <data encoding="csv">
 21,8,14,29,31,19,23,5,25,4,29,15,6,16,29,4,2,24,22,25,11,31,17,27,31,23,5,10,6,32,
 9,31,22,22,18,17,31,26,8,10,27,16,1,15,4,27,28,26,11,28,16,21,18,24,16,27,29,17,19,19,
@@ -32,7 +32,7 @@
 14,8,27,30,21,7,9,25,31,20,27,28,10,5,2,24,23,12,23,31,32,24,3,15,14,8,30,2,32,14
 </data>
  </layer>
- <layer id="9" name="Ground-2" class="Ground" width="30" height="20" visible="0">
+ <layer id="9" name="Ground-2" class="Ground" width="30" height="20">
   <data encoding="csv">
 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -112,16 +112,24 @@
   <object id="6" class="collision" x="451.036" y="481.162" width="24.1011" height="25.8226"/>
   <object id="10" class="collision" x="671.971" y="381.896" width="57.6706" height="59.3921"/>
  </objectgroup>
- <objectgroup id="6" name="mobs">
-  <object id="14" name="Mob" x="667.928" y="165.45">
+ <objectgroup id="6" name="objects">
+  <object id="14" name="Mob" class="Unit" x="667.928" y="165.45">
    <properties>
     <property name="script" value="follower"/>
    </properties>
    <point/>
   </object>
-  <object id="15" name="Friendly Mob" x="384.401" y="458.746">
+  <object id="15" name="Friendly Mob" class="Unit" x="384.401" y="458.746">
    <properties>
     <property name="friendly" type="bool" value="true"/>
+   </properties>
+   <point/>
+  </object>
+  <object id="17" name="Portal to Instance" class="Portal" x="749.333" y="142">
+   <properties>
+    <property name="map" value="start-2.tmx"/>
+    <property name="x" type="float" value="500"/>
+    <property name="y" type="float" value="300"/>
    </properties>
    <point/>
   </object>

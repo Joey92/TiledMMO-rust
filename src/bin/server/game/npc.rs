@@ -7,7 +7,7 @@ use tiled_game::components::*;
 use super::{
     combat::{DoDamageEvent, LeaveCombatEvent},
     player::Player,
-    unit::{Follow, MoveDestination, Speed, Target, UnitBundle, UnitsNearby},
+    unit::{Follow, MoveDestination, Speed, UnitBundle, UnitsNearby},
 };
 
 // A vector that represents the NPCs home position
@@ -51,10 +51,11 @@ pub struct NPCPlugin;
 impl Plugin for NPCPlugin {
     fn build(&self, app: &mut App) {
         app.add_system(npc_evade_system)
-            .add_system_to_stage(CoreStage::PostUpdate, return_to_home_system.after("combat"))
-            .add_system_to_stage(
-                CoreStage::PostUpdate,
-                npc_reset_system.after(return_to_home_system),
+            .add_system(return_to_home_system.in_base_set(CoreSet::PostUpdate))
+            .add_system(
+                npc_evaded
+                    .in_base_set(CoreSet::PostUpdate)
+                    .after(return_to_home_system),
             )
             .add_system(aggro_by_range_system)
             .add_system(aggro_by_damage_system)
@@ -80,7 +81,7 @@ fn return_to_home_system(
 }
 
 // Runs after the NPC stops evading
-fn npc_reset_system(out_of_combat: RemovedComponents<Evading>) {
+fn npc_evaded(mut out_of_combat: RemovedComponents<Evading>) {
     // no need to check if entity is a NPC since only NPCs can evade
     for entity in out_of_combat.iter() {
         println!("NPC returned home: {:?}", entity);
@@ -107,39 +108,50 @@ fn npc_evade_system(
 fn aggro_by_range_system(
     mut cmd: Commands,
     // Who can be aggroed
-    aggressors: Query<(Entity, &Transform), (With<NPC>, Without<Friendly>, Without<InCombat>)>,
+    aggressors: Query<
+        (Entity, &Transform, &Parent),
+        (With<NPC>, Without<Friendly>, Without<InCombat>),
+    >,
 
     // possible targets that can pull the aggressor
-    entities_that_can_aggro: Query<Entity, (With<Player>, Without<Dead>)>, // currently only players can aggro
+    entities_that_can_aggro: Query<(Entity, &Transform, &Parent), (With<Player>, Without<Dead>)>, // currently only players can aggro
 
-    units: Res<UnitsNearby>,
+                                                                                                  // todo: re-enable this when bevy_spatial is updated
+                                                                                                  // units: Res<UnitsNearby>,
 ) {
-    for (aggro_entity, aggro_transform) in aggressors.iter() {
-        // find all targets in range
-        let targets_in_range = units.within_distance(aggro_transform.translation, 100.0);
+    for (aggro_entity, aggro_transform, map_instance) in aggressors.iter() {
+        let targets_in_range: Vec<_> = entities_that_can_aggro
+            .iter()
+            .filter(|(_, _, nearby_map_instance)| nearby_map_instance.get() == map_instance.get())
+            .filter(|(_, target_transform, _)| {
+                aggro_transform
+                    .translation
+                    .distance(target_transform.translation)
+                    < 100.0
+            })
+            .collect();
+        // // find all targets in range
+        // let targets_in_range = units.within_distance(aggro_transform.translation, 100.0);
 
-        // if there are no targets, remove the aggro component
+        // // if there are no targets, remove the aggro component
         if targets_in_range.is_empty() {
-            println!("no one aggroed");
             // do nothing
             continue;
         }
 
         // find the first target that is allowed
-        for (_, target_entity) in targets_in_range.iter() {
-            let target = entities_that_can_aggro.get(*target_entity).ok();
+        for (target, _, _) in targets_in_range {
+            // let target = entities_that_can_aggro.get(*target_entity).ok();
 
-            if let Some(target) = target {
-                let mut threat = ThreatMap::new();
-                threat.insert(target, 100);
+            let mut threat = ThreatMap::new();
+            threat.insert(target, 100);
 
-                cmd.entity(aggro_entity)
-                    .insert(Target(target))
-                    .insert(Threat(threat))
-                    .insert(InCombat)
-                    .insert(Follow(target));
-                break;
-            }
+            cmd.entity(aggro_entity)
+                .insert(Target(target))
+                .insert(Threat(threat))
+                .insert(InCombat)
+                .insert(Follow(target));
+            break;
         }
     }
 }

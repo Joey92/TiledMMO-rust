@@ -20,6 +20,13 @@ pub enum DisconnectionReason {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub enum PlayerErrorMessage {
+    TooFarAway,
+    ManaTooLow,
+    Unusable,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub enum ServerMessages {
     Disconnect {
         reason: DisconnectionReason,
@@ -62,12 +69,15 @@ pub enum ServerMessages {
         mana: i32,
         max_mana: i32,
         threat: Option<ThreatMap>,
+        interactable: bool,
     },
     Move {
         entity: Entity,
         pos: Vec3,
     },
 
+    // Update the client with the current vital values
+    // such as health, mana, etc
     Vitals {
         entity: Entity,
         vital: Vitals,
@@ -79,6 +89,7 @@ pub enum ServerMessages {
         pos: Vec3,
     },
 
+    
     Threat {
         entity: Entity,
         threat: ThreatMap,
@@ -87,5 +98,9 @@ pub enum ServerMessages {
     CombatState {
         entity: Entity,
         in_combat: bool,
+    },
+
+    PlayerError {
+        error: PlayerErrorMessage,
     },
 }

@@ -9,10 +9,13 @@ use bevy::{
     time::{Time, Timer, TimerMode},
 };
 use tiled::{Loader, Map as TiledMap};
-use tiled_game::network::messages::server::ServerMessages;
+use tiled_game::{components::Interactable, network::messages::server::ServerMessages};
 
 use crate::{
-    game::npc::{Friendly, NPCBundle},
+    game::{
+        interactions::Portal,
+        npc::{Friendly, NPCBundle},
+    },
     network::{NetworkClientId, SendServerMessageEvent},
 };
 
@@ -36,9 +39,9 @@ pub struct MapInstanceEntity(pub Entity);
 #[derive(Component, Debug)]
 pub struct NPCList(HashSet<Entity>);
 
-#[derive(Component)]
 pub struct Teleport {
-    pub map: MapName,
+    pub entity: Entity,
+    pub map: String,
     pub map_instance: Option<Entity>,
     pub prev_map_instance: Option<Entity>,
     pub position: Transform,
@@ -68,10 +71,11 @@ impl Plugin for MapsPlugin {
         app.add_startup_system(map_manager)
             // Handle despawn of entities
             .add_event::<DespawnEvent>()
+            .add_event::<Teleport>()
             // removes map instances with no players in certain intervals
             .add_system(map_instance_cleanup)
             // teleports players between map instances
-            .add_system(map_change_handler)
+            .add_system(handle_teleport)
             // sends all units to the client
             .add_system(send_map_instance_entities)
             // Spawns NPCs on new map instances
@@ -180,23 +184,33 @@ pub struct DespawnEvent {
     pub map: Entity,
 }
 
-fn map_change_handler(
+fn handle_teleport(
     mut commands: Commands,
     mut map_manager: ResMut<MapManager>,
     mut server_message: EventWriter<SendServerMessageEvent>,
     mut despawn_event: EventWriter<DespawnEvent>,
-    teleporting_players: Query<(Entity, &Teleport, &NetworkClientId), With<Teleport>>,
+    mut teleport_events: EventReader<Teleport>,
+    players: Query<(Entity, &NetworkClientId)>,
 ) {
-    for (player_entity, map_change_request, client_id) in teleporting_players.iter() {
+    for teleport in teleport_events.iter() {
         println!(
-            "Player {:?} wants to change map to {:?}",
-            player_entity, map_change_request.map
+            "Unit {:?} wants to change map to {:?}",
+            teleport.entity, teleport.map
         );
+
+        let entity = players.get(teleport.entity).ok();
+
+        if entity.is_none() {
+            println!("Entity {:?} not found", teleport.entity);
+            continue;
+        }
+
+        let teleporting_entity = entity.unwrap();
 
         let mut map_instance = None;
 
         // Check if map instance exists
-        if let Some(dest_instance) = map_change_request.map_instance {
+        if let Some(dest_instance) = teleport.map_instance {
             for instance_entity in map_manager.instances.iter() {
                 if *instance_entity == dest_instance {
                     // found map instance
@@ -206,7 +220,7 @@ fn map_change_handler(
                     // };
                     println!(
                         "Found map instance {:?} for player {:?}",
-                        instance_entity, player_entity
+                        instance_entity, teleporting_entity
                     );
 
                     map_instance = Some(*instance_entity)
@@ -215,11 +229,11 @@ fn map_change_handler(
         }
 
         // Check if global map instance exists
-        if let Some(global_map) = map_manager.global.get(&map_change_request.map.0) {
+        if let Some(global_map) = map_manager.global.get(&teleport.map) {
             // Subtract player from current map instance
             println!(
                 "Found global map instance {:?} for player {:?}",
-                &map_change_request.map.0, player_entity
+                &teleport.map, teleporting_entity
             );
 
             map_instance = Some(*global_map)
@@ -228,49 +242,48 @@ fn map_change_handler(
         if map_instance.is_none() {
             println!(
                 "No map instance found for {:?}, creating a new one",
-                map_change_request.map.0
+                teleport.map
             );
 
             // If no map instance was found, create a new one
             let new_map_instance = commands
-                .spawn((MapInstance, MapName(map_change_request.map.0.clone())))
+                .spawn((MapInstance, MapName(teleport.map.clone())))
                 .id();
 
             map_manager.instances.push(new_map_instance);
 
-            println!("Created new instance of map {:?}", map_change_request.map.0);
+            println!("Created new instance of map {:?}", teleport.map);
             map_instance = Some(new_map_instance);
         }
 
         // check if we need to be removed from previous map instance
-        if let Some(prev_instance) = map_change_request.prev_map_instance {
+        if let Some(prev_instance) = teleport.prev_map_instance {
             commands
                 .entity(prev_instance)
-                .remove_children(&[player_entity]);
+                .remove_children(&[teleporting_entity.0]);
 
             despawn_event.send(DespawnEvent {
-                entity: player_entity,
+                entity: teleporting_entity.0,
                 map: prev_instance,
             });
         };
 
         commands
             .entity(map_instance.unwrap())
-            .push_children(&[player_entity]);
+            .push_children(&[teleporting_entity.0]);
 
         // Add player to map instance
         commands
-            .entity(player_entity)
-            .remove::<Teleport>()
-            .insert(map_change_request.position);
+            .entity(teleporting_entity.0)
+            .insert(teleport.position);
 
         // send map change event to client
         // so it can load the new map
         server_message.send(SendServerMessageEvent {
-            client_id: Some(client_id.0),
+            client_id: Some(teleporting_entity.1 .0),
             message: ServerMessages::Map {
-                name: map_change_request.map.0.clone(),
-                position: map_change_request.position.translation,
+                name: teleport.map.clone(),
+                position: teleport.position.translation,
             },
         });
     }
@@ -320,13 +333,69 @@ fn spawn_units(
                     });
 
                     obj.properties.get("friendly").map(|script| match script {
-                        tiled::PropertyValue::BoolValue(friendly) => {
-                            if *friendly {
+                        tiled::PropertyValue::BoolValue(val) => {
+                            if *val {
                                 cmd.insert(Friendly);
                             }
                         }
                         _ => {}
                     });
+
+                    obj.properties
+                        .get("interactable")
+                        .map(|script| match script {
+                            tiled::PropertyValue::BoolValue(val) => {
+                                if *val {
+                                    cmd.insert(Interactable);
+                                }
+                            }
+                            _ => {}
+                        });
+
+                    if obj.user_type == "Portal" {
+                        let map_name = obj
+                            .properties
+                            .get("map")
+                            .map(|script| match script {
+                                tiled::PropertyValue::StringValue(map_name) => {
+                                    Some(map_name.to_owned())
+                                }
+                                _ => None,
+                            })
+                            .flatten();
+
+                        let x = obj
+                            .properties
+                            .get("x")
+                            .map(|script| match script {
+                                tiled::PropertyValue::FloatValue(map_name) => {
+                                    Some(map_name.to_owned())
+                                }
+                                _ => None,
+                            })
+                            .flatten();
+
+                        let y = obj
+                            .properties
+                            .get("y")
+                            .map(|script| match script {
+                                tiled::PropertyValue::FloatValue(map_name) => {
+                                    Some(map_name.to_owned())
+                                }
+                                _ => None,
+                            })
+                            .flatten();
+
+                        match (map_name, x, y) {
+                            (Some(map_name), Some(x), Some(y)) => {
+                                cmd.insert(Portal {
+                                    map: map_name,
+                                    position: Transform::from_xyz(x, y, 0.),
+                                });
+                            }
+                            _ => {}
+                        }
+                    }
 
                     let id = cmd.id();
 

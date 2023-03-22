@@ -7,14 +7,17 @@ use bevy_renet::{
     renet::{RenetServer, ServerAuthentication, ServerConfig, ServerEvent},
     RenetServerPlugin,
 };
-use tiled_game::network::{
-    messages::{client::ClientMessages, server::ServerMessages},
-    server_connection_config, ClientChannel, ServerChannel, PROTOCOL_ID,
+use tiled_game::{
+    components::Target,
+    network::{
+        messages::{client::ClientMessages, server::ServerMessages},
+        server_connection_config, ClientChannel, ServerChannel, PROTOCOL_ID,
+    },
 };
 
 use sync_systems::*;
 
-use crate::game::{player::LoggingOut, unit::Target};
+use crate::game::{player::LoggingOut, SystemLabels};
 
 #[derive(Component, Debug)]
 pub struct NetworkClientId(pub u64);
@@ -40,26 +43,24 @@ impl Plugin for NetworkPlugin {
             .insert_resource(NetworkResource::default())
             .add_event::<SendServerMessageEvent>()
             .add_event::<SendEntityInfoEvent>()
-            .add_system_set(
-                SystemSet::new()
-                    .with_system(send_movement)
-                    .with_system(send_despawn)
-                    .with_system(send_vitals_changed)
-                    .with_system(send_death_events)
-                    .with_system(send_threat)
-                    .with_system(send_entered_combat)
-                    .with_system(send_spawn)
-                    .with_system(send_exit_combat)
-                    .with_system(send_entity_info)
-                    .label("ecs_sync"),
+            .add_systems(
+                (
+                    send_movement,
+                    send_despawn,
+                    send_vitals_changed,
+                    send_death_events,
+                    send_threat,
+                    send_entered_combat,
+                    send_spawn,
+                    send_exit_combat,
+                    send_entity_info,
+                )
+                    .in_set(SystemLabels::NetworkPrepare),
             )
             // Receive Server Events
-            .add_system_to_stage(CoreStage::PreUpdate, handle_connection_events)
-            .add_system_to_stage(
-                CoreStage::PreUpdate,
-                handle_client_messages.after(handle_connection_events),
-            )
-            .add_system(send_message_system.after("ecs_sync"))
+            .add_system(handle_connection_events.in_base_set(CoreSet::PreUpdate))
+            .add_system(handle_client_messages.after(handle_connection_events))
+            .add_system(send_message_system.after(SystemLabels::NetworkPrepare))
             .add_system(disconnect_clients_on_exit);
     }
 }
@@ -154,12 +155,16 @@ fn handle_client_messages(
 
                     // user selected or unselected a target
                     ClientMessages::Target { target } => {
+                        println!("Target: {:?}", target);
                         if let Some(target_entity) = target {
                             commands.entity(*entity).insert(Target(target_entity));
                             continue;
                         }
 
                         commands.entity(*entity).remove::<Target>();
+                    }
+                    ClientMessages::Interact { entity } => {
+                        println!("Interact with {:?}", entity);
                     }
                 }
             }

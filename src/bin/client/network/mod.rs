@@ -9,8 +9,9 @@ use bevy::{
 };
 use bevy_rapier2d::prelude::*;
 use bevy_renet::{
+    client_connected,
     renet::{ClientAuthentication, RenetClient, RenetError},
-    run_if_client_connected, RenetClientPlugin,
+    RenetClientPlugin,
 };
 use tiled_game::network::{
     client_connection_config,
@@ -31,6 +32,10 @@ use crate::{
     },
     helpers::camera::CameraTarget,
 };
+
+use self::sync::*;
+
+mod sync;
 
 fn new_renet_client() -> RenetClient {
     let server_addr = "127.0.0.1:3387".parse().expect("Invalid server address");
@@ -77,32 +82,17 @@ impl Plugin for NetworkPlugin {
         app.add_plugin(RenetClientPlugin::default())
             .insert_resource(new_renet_client())
             .init_resource::<ClientState>()
-            .add_system_set(
-                SystemSet::new()
-                    .with_run_criteria(run_if_client_connected)
-                    .with_system(handle_server_messages)
-                    .with_system(sync_movement)
-                    .label("network"),
+            .add_systems(
+                (
+                    handle_server_messages,
+                    sync_movement,
+                    sync_target,
+                    sync_target_deselect,
+                )
+                    .distributive_run_if(client_connected),
             )
-            .add_system_to_stage(CoreStage::Last, disconnect_on_exit)
+            .add_system(disconnect_on_exit)
             .add_system(panic_on_error_system);
-    }
-}
-
-// Sync player movement to the server
-fn sync_movement(
-    movement: Query<&Transform, (With<Player>, Changed<Transform>)>,
-    mut client: ResMut<RenetClient>,
-) {
-    for transform in movement.iter() {
-        let msg = ClientMessages::Move {
-            x: transform.translation.x,
-            y: transform.translation.y,
-        };
-
-        let msg = bincode::serialize(&msg).unwrap();
-
-        client.send_message(ClientChannel::Input, msg);
     }
 }
 
@@ -159,6 +149,7 @@ fn handle_server_messages(
                 mana,
                 max_mana,
                 threat,
+                interactable,
             } => {
                 let client_entity = client_state
                     .server_client_entity_mapping
@@ -199,6 +190,10 @@ fn handle_server_messages(
                 if is_player {
                     cmd.insert(PlayerEntity);
                 }
+
+                if interactable {
+                    cmd.insert(Interactable);
+                }
             }
             ServerMessages::Move {
                 entity: server_entity,
@@ -212,6 +207,8 @@ fn handle_server_messages(
                     log::debug!("Move entity: {:?}", server_entity);
                     commands
                         .entity(*client_side_entity)
+                        // todo: entities bounce between z index 0 and their correct position
+                        // causing them to flicker when the player is behind them
                         .insert(Transform::from_translation(pos));
                 }
             }
@@ -236,8 +233,10 @@ fn handle_server_messages(
                             sprite: Sprite {
                                 color: Color::rgb(0., 0.25, 0.75),
                                 custom_size: Some(Vec2::new(40.0, 40.0)),
+
                                 ..default()
                             },
+
                             ..default()
                         },
                         Collider::cuboid(20., 20.),
@@ -334,6 +333,13 @@ fn handle_server_messages(
             ServerMessages::Disconnect { reason } => {
                 panic!("Disconnected from server: {:?}", reason)
             }
+            ServerMessages::PlayerError { error } => match error {
+                tiled_game::network::messages::server::PlayerErrorMessage::TooFarAway => {
+                    println!("Too far away");
+                }
+                tiled_game::network::messages::server::PlayerErrorMessage::ManaTooLow => todo!(),
+                tiled_game::network::messages::server::PlayerErrorMessage::Unusable => todo!(),
+            },
         }
     }
 }

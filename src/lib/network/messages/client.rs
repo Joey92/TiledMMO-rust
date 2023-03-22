@@ -9,4 +9,5 @@ pub enum ClientMessages {
     Target { target: Option<Entity> },
     Move { x: f32, y: f32 },
     RequestEntityInfo { entity: Entity },
+    Interact { entity: Entity },
 }

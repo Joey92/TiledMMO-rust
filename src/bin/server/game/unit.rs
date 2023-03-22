@@ -7,13 +7,10 @@ use bevy_spatial::KDTreeAccess2D;
 use tiled_game::components::*;
 
 use super::combat::DoDamageEvent;
+use super::SystemLabels;
 
 #[derive(Component, Default)]
 pub struct Unit;
-
-// the current target of the entity
-#[derive(Component, Debug)]
-pub struct Target(pub Entity);
 
 // A vector that the movement system will try to get to
 #[derive(Component)]
@@ -89,7 +86,7 @@ impl Plugin for UnitPlugin {
             .add_system(health_recovery_system)
             .add_event::<DeathEvent>()
             .add_system(death_system)
-            .add_system(target_on_damage.after("damage"));
+            .add_system(target_on_damage.after(SystemLabels::Damage));
     }
 }
 

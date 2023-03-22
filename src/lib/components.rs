@@ -17,10 +17,17 @@ pub struct MaxMana(pub i32);
 pub struct MaxHealth(pub i32);
 
 #[derive(Component)]
+pub struct Target(pub Entity);
+
+#[derive(Component)]
 pub struct Dead;
 
 #[derive(Component)]
 pub struct InCombat;
+
+// This is a marker component that is added to entities that can right-clicked on.
+#[derive(Component)]
+pub struct Interactable;
 
 // Use bevy's HashMap type because Reflect is implemented for it
 pub type ThreatMap = HashMap<Entity, i32>;

@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::{game::unit::UnitBundle, network::NetworkClientId};
 
-use super::map::{DespawnEvent, MapName, Teleport};
+use super::map::{DespawnEvent, Teleport};
 
 #[derive(Component)]
 pub struct Player;
@@ -25,24 +25,24 @@ impl Plugin for PlayerPlugin {
 
 pub fn player_join(
     mut commands: Commands,
+    mut teleport_event: EventWriter<Teleport>,
     new_connected_players: Query<Entity, Added<NetworkClientId>>,
 ) {
-    for player_entity in new_connected_players.iter() {
-        println!("Adding new player: {:?}", player_entity);
+    for entity in new_connected_players.iter() {
+        println!("Adding new player: {:?}", entity);
         // fetch player info from database
-        commands
-            .entity(player_entity)
-            .insert((
-                UnitBundle::new("John Doe".into(), Transform::from_xyz(30., 30., 0.)),
-                Player,
-            ))
-            // add teleport component so the map change system can handle it
-            .insert(Teleport {
-                map: MapName("start.tmx".to_string()),       // todo: db
-                position: Transform::from_xyz(30., 30., 0.), // todo: db
-                map_instance: None,                          // todo: db
-                prev_map_instance: None,
-            });
+        commands.entity(entity).insert((
+            UnitBundle::new("John Doe".into(), Transform::from_xyz(30., 30., 0.)),
+            Player,
+        ));
+
+        teleport_event.send(Teleport {
+            entity,
+            map: "start.tmx".to_string(),                // todo: db
+            position: Transform::from_xyz(30., 30., 0.), // todo: db
+            map_instance: None,                          // todo: db
+            prev_map_instance: None,
+        });
     }
 }
 
