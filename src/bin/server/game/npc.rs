@@ -6,6 +6,7 @@ use tiled_game::components::*;
 
 use super::{
     combat::{DoDamageEvent, LeaveCombatEvent},
+    map,
     player::Player,
     unit::{Follow, MoveDestination, Speed, UnitBundle, UnitsNearby},
 };
@@ -15,9 +16,9 @@ use super::{
 #[derive(Component, Debug)]
 pub struct Home(pub Vec3);
 
-// friendly to players
+// enemy to players
 #[derive(Component)]
-pub struct Friendly;
+pub struct Enemy;
 
 #[derive(Component)]
 pub struct NPC;
@@ -34,10 +35,10 @@ pub struct NPCBundle {
 }
 
 impl NPCBundle {
-    pub fn new(name: String, transform: Transform) -> Self {
+    pub fn new(name: String, class: String, transform: Transform) -> Self {
         let mut npc = Self {
             npc: NPC,
-            unit: UnitBundle::new(name, transform),
+            unit: UnitBundle::new(name, class, transform),
             home: Home(transform.translation),
         };
 
@@ -108,30 +109,16 @@ fn npc_evade_system(
 fn aggro_by_range_system(
     mut cmd: Commands,
     // Who can be aggroed
-    aggressors: Query<
-        (Entity, &Transform, &Parent),
-        (With<NPC>, Without<Friendly>, Without<InCombat>),
-    >,
+    aggressors: Query<(Entity, &Transform, &Parent), (With<NPC>, With<Enemy>, Without<InCombat>)>,
 
     // possible targets that can pull the aggressor
     entities_that_can_aggro: Query<(Entity, &Transform, &Parent), (With<Player>, Without<Dead>)>, // currently only players can aggro
 
-                                                                                                  // todo: re-enable this when bevy_spatial is updated
-                                                                                                  // units: Res<UnitsNearby>,
+    units: Res<UnitsNearby>,
 ) {
     for (aggro_entity, aggro_transform, map_instance) in aggressors.iter() {
-        let targets_in_range: Vec<_> = entities_that_can_aggro
-            .iter()
-            .filter(|(_, _, nearby_map_instance)| nearby_map_instance.get() == map_instance.get())
-            .filter(|(_, target_transform, _)| {
-                aggro_transform
-                    .translation
-                    .distance(target_transform.translation)
-                    < 100.0
-            })
-            .collect();
-        // // find all targets in range
-        // let targets_in_range = units.within_distance(aggro_transform.translation, 100.0);
+        // find all targets in range
+        let targets_in_range = units.within_distance(aggro_transform.translation.truncate(), 100.0);
 
         // // if there are no targets, remove the aggro component
         if targets_in_range.is_empty() {
@@ -140,17 +127,33 @@ fn aggro_by_range_system(
         }
 
         // find the first target that is allowed
-        for (target, _, _) in targets_in_range {
-            // let target = entities_that_can_aggro.get(*target_entity).ok();
+        for (_, target_entity) in targets_in_range {
+            if target_entity.is_none() {
+                continue;
+            }
+
+            let target_entity = target_entity.unwrap();
+            let target = entities_that_can_aggro.get(target_entity).ok();
+
+            if target.is_none() {
+                continue;
+            }
+
+            let (target, _, target_map_instance) = target.unwrap();
+
+            if map_instance != target_map_instance {
+                continue;
+            }
 
             let mut threat = ThreatMap::new();
             threat.insert(target, 100);
 
-            cmd.entity(aggro_entity)
-                .insert(Target(target))
-                .insert(Threat(threat))
-                .insert(InCombat)
-                .insert(Follow(target));
+            cmd.entity(aggro_entity).insert((
+                Target(target),
+                Threat(threat),
+                InCombat,
+                Follow(target),
+            ));
             break;
         }
     }

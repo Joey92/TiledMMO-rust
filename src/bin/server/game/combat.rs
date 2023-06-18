@@ -9,7 +9,7 @@ use tiled_game::components::*;
 
 use super::{
     npc::{Evading, Home, NPC},
-    unit::{AttackSpeed, Unit},
+    unit::AttackSpeed,
     SystemLabels,
 };
 

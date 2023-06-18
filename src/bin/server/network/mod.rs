@@ -4,14 +4,18 @@ use std::{net::UdpSocket, time::SystemTime};
 
 use bevy::{app::AppExit, prelude::*};
 use bevy_renet::{
-    renet::{RenetServer, ServerAuthentication, ServerConfig, ServerEvent},
+    renet::{
+        transport::{NetcodeServerTransport, ServerAuthentication, ServerConfig},
+        ConnectionConfig, DefaultChannel, RenetServer, ServerEvent,
+    },
+    transport::NetcodeServerPlugin,
     RenetServerPlugin,
 };
 use tiled_game::{
     components::Target,
     network::{
         messages::{client::ClientMessages, server::ServerMessages},
-        server_connection_config, ClientChannel, ServerChannel, PROTOCOL_ID,
+        PROTOCOL_ID,
     },
 };
 
@@ -36,10 +40,13 @@ pub struct NetworkPlugin;
 
 impl Plugin for NetworkPlugin {
     fn build(&self, app: &mut App) {
+        let (server, transport) = new_renet_server();
         app
             // Initialize Network
-            .add_plugin(RenetServerPlugin::default())
-            .insert_resource(new_renet_server())
+            .add_plugin(RenetServerPlugin)
+            .add_plugin(NetcodeServerPlugin)
+            .insert_resource(server)
+            .insert_resource(transport)
             .insert_resource(NetworkResource::default())
             .add_event::<SendServerMessageEvent>()
             .add_event::<SendEntityInfoEvent>()
@@ -73,23 +80,29 @@ fn send_message_system(
         let message = bincode::serialize(&event.message).unwrap();
 
         match event.client_id {
-            Some(client) => server.send_message(client, ServerChannel::ServerMessages, message),
-            None => server.broadcast_message(ServerChannel::ServerMessages, message),
+            Some(client) => server.send_message(client, DefaultChannel::ReliableUnordered, message),
+            None => server.broadcast_message(DefaultChannel::ReliableUnordered, message),
         }
     }
 }
 
-pub fn new_renet_server() -> RenetServer {
-    let server_addr = "127.0.0.1:3387".parse().expect("Invalid server address");
-    let socket = UdpSocket::bind(server_addr).expect("Failed to bind socket");
-    let connection_config = server_connection_config();
-    let server_config =
-        ServerConfig::new(64, PROTOCOL_ID, server_addr, ServerAuthentication::Unsecure);
+pub fn new_renet_server() -> (RenetServer, NetcodeServerTransport) {
+    let server = RenetServer::new(ConnectionConfig::default());
+    let public_addr = "127.0.0.1:3387".parse().expect("Invalid server address");
+    let socket = UdpSocket::bind(public_addr).expect("Failed to bind socket");
+    let server_config = ServerConfig {
+        max_clients: 64,
+        protocol_id: PROTOCOL_ID,
+        public_addr,
+        authentication: ServerAuthentication::Unsecure,
+    };
     let current_time = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap();
-    RenetServer::new(current_time, server_config, connection_config, socket)
-        .expect("Failed to create server")
+
+    let transport = NetcodeServerTransport::new(current_time, server_config, socket).unwrap();
+
+    (server, transport)
 }
 
 fn handle_connection_events(
@@ -100,24 +113,30 @@ fn handle_connection_events(
 ) {
     for event in connection_events.iter() {
         match event {
-            ServerEvent::ClientConnected(id, _ /* auth message */) => {
-                println!("Client connected: {}", id);
+            ServerEvent::ClientConnected {
+                client_id, /* auth message */
+            } => {
+                println!("Client connected: {}", client_id);
                 // create an empty entity with the client id
                 // other systems should add the rest of the components
-                let entity = commands.spawn_empty().insert(NetworkClientId(*id)).id();
-                client_entities.player_entity_map.insert(*id, entity);
+                let entity = commands
+                    .spawn_empty()
+                    .insert(NetworkClientId(*client_id))
+                    .id();
+                client_entities.player_entity_map.insert(*client_id, entity);
 
                 server_message_events.send(SendServerMessageEvent {
-                    client_id: Some(*id),
+                    client_id: Some(*client_id),
                     message: ServerMessages::PlayerInfo {
                         entity,
                         pos: Vec3::new(0., 0., 0.),
+                        img: "dreamland/Characters/Character_001".to_string(),
                     },
                 });
             }
-            ServerEvent::ClientDisconnected(id) => {
-                println!("Client disconnected: {}", id);
-                let client = client_entities.player_entity_map.remove(id);
+            ServerEvent::ClientDisconnected { client_id, reason } => {
+                println!("Client disconnected: {}", client_id);
+                let client = client_entities.player_entity_map.remove(client_id);
 
                 if let Some(entity) = client {
                     commands.entity(entity).insert(LoggingOut);
@@ -134,7 +153,9 @@ fn handle_client_messages(
     mut commands: Commands,
 ) {
     for client_id in server.clients_id().into_iter() {
-        while let Some(message) = server.receive_message(client_id, ClientChannel::Input) {
+        while let Some(message) =
+            server.receive_message(client_id, DefaultChannel::ReliableUnordered)
+        {
             let message: ClientMessages = bincode::deserialize(&message).unwrap();
             // println!("Received message from client {}: {:?}", client_id, message);
             if let Some(entity) = client_entities.player_entity_map.get(&client_id) {
@@ -178,7 +199,7 @@ fn disconnect_clients_on_exit(exit: EventReader<AppExit>, mut server: ResMut<Ren
             reason: tiled_game::network::messages::server::DisconnectionReason::ServerShutdown,
         };
         let disconnect_msg = bincode::serialize(&msg).unwrap();
-        server.broadcast_message(ServerChannel::ServerMessages, disconnect_msg);
-        server.disconnect_clients();
+        server.broadcast_message(DefaultChannel::ReliableUnordered, disconnect_msg);
+        server.disconnect_all();
     }
 }

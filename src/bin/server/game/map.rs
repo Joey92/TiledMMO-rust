@@ -14,7 +14,7 @@ use tiled_game::{components::Interactable, network::messages::server::ServerMess
 use crate::{
     game::{
         interactions::Portal,
-        npc::{Friendly, NPCBundle},
+        npc::{Enemy, NPCBundle},
     },
     network::{NetworkClientId, SendServerMessageEvent},
 };
@@ -321,7 +321,7 @@ fn spawn_units(
                     );
 
                     cmd.insert((
-                        NPCBundle::new(obj.name.to_owned(), spawn_point),
+                        NPCBundle::new(obj.name.to_owned(), obj.user_type.clone(), spawn_point),
                         MapInstanceEntity(map_instance_entity),
                     ));
 
@@ -332,10 +332,10 @@ fn spawn_units(
                         _ => {}
                     });
 
-                    obj.properties.get("friendly").map(|script| match script {
+                    obj.properties.get("enemy").map(|script| match script {
                         tiled::PropertyValue::BoolValue(val) => {
                             if *val {
-                                cmd.insert(Friendly);
+                                cmd.insert(Enemy);
                             }
                         }
                         _ => {}
@@ -399,7 +399,10 @@ fn spawn_units(
 
                     let id = cmd.id();
 
-                    println!("Spawning unit {:?} ({:?})", obj.name, id);
+                    println!(
+                        "Spawning unit {:?} ({:?}) Server ID: {:?}",
+                        obj.name, obj.user_type, id
+                    );
 
                     commands.entity(map_instance_entity).push_children(&[id]);
                 });

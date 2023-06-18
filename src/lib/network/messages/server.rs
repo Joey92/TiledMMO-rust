@@ -1,4 +1,4 @@
-use bevy::prelude::{Entity, Vec3};
+use bevy::prelude::{Entity, Quat, Vec3};
 
 use serde::{Deserialize, Serialize};
 
@@ -32,10 +32,12 @@ pub enum ServerMessages {
         reason: DisconnectionReason,
     },
 
+    // Makes the client load a particular map
     Map {
         name: String,
         position: Vec3,
     },
+
     // The server has despawned an entity
     // Mostly players leaving the map
     Despawn {
@@ -57,7 +59,6 @@ pub enum ServerMessages {
 
     // Information about any spawnable game object
     // This should be re-sent to update missing info on the client as well
-    // consider adding a EntityInfo ClientMessage to request this info
     EntityInfo {
         entity: Entity,
         pos: Vec3,
@@ -68,12 +69,17 @@ pub enum ServerMessages {
         max_health: i32,
         mana: i32,
         max_mana: i32,
+        unit: String,
         threat: Option<ThreatMap>,
         interactable: bool,
+        rotation: Quat,
     },
+
+    // entity has moved
     Move {
         entity: Entity,
         pos: Vec3,
+        rotation: Quat,
     },
 
     // Update the client with the current vital values
@@ -87,9 +93,9 @@ pub enum ServerMessages {
     PlayerInfo {
         entity: Entity,
         pos: Vec3,
+        img: String,
     },
 
-    
     Threat {
         entity: Entity,
         threat: ThreatMap,

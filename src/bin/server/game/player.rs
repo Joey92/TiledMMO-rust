@@ -32,7 +32,11 @@ pub fn player_join(
         println!("Adding new player: {:?}", entity);
         // fetch player info from database
         commands.entity(entity).insert((
-            UnitBundle::new("John Doe".into(), Transform::from_xyz(30., 30., 0.)),
+            UnitBundle::new(
+                "John Doe".into(),
+                String::from("Fantasy Dreamland/Characters/Character_001"),
+                Transform::from_xyz(30., 30., 0.),
+            ),
             Player,
         ));
 

@@ -1,4 +1,4 @@
-use bevy::prelude::{App, Component, Plugin};
+use bevy::prelude::*;
 
 use self::movement::player_movement;
 
@@ -8,6 +8,9 @@ mod movement;
 pub struct Player;
 
 pub struct PlayerPlugin;
+
+#[derive(Component)]
+pub struct PlayerTarget;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {

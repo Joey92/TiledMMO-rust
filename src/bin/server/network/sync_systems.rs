@@ -1,3 +1,5 @@
+use std::f32::consts::PI;
+
 use bevy::prelude::*;
 use tiled_game::{
     components::*,
@@ -7,9 +9,9 @@ use tiled_game::{
 use crate::game::{
     combat::LeaveCombatEvent,
     map::DespawnEvent,
-    npc::{Friendly, NPC},
+    npc::{Enemy, NPC},
     player::{Charmed, Player},
-    unit::{DeathEvent, Unit},
+    unit::DeathEvent,
 };
 
 use super::{NetworkClientId, SendServerMessageEvent};
@@ -163,6 +165,7 @@ pub fn send_movement(
                     message: ServerMessages::Move {
                         entity: moved_entity,
                         pos: transform.translation,
+                        rotation: transform.rotation,
                     },
                 });
             }
@@ -185,8 +188,9 @@ pub fn send_entity_info(
         &MaxHealth,
         &Mana,
         &MaxMana,
+        &Unit,
         Option<&Player>,
-        Option<&Friendly>,
+        Option<&Enemy>,
         Option<&Threat>,
         Option<&Interactable>,
     )>,
@@ -203,6 +207,7 @@ pub fn send_entity_info(
                 max_health,
                 mana,
                 max_mana,
+                unit,
                 player,
                 friend,
                 threat,
@@ -219,8 +224,10 @@ pub fn send_entity_info(
                     max_health: max_health.0,
                     mana: mana.0,
                     max_mana: max_mana.0,
+                    unit: unit.0.clone(),
                     threat: threat.map(|t| Some(t.0.clone())).unwrap_or(None),
                     interactable: interactable.is_some(),
+                    rotation: transform.rotation,
                 },
             },
             _ => {

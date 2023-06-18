@@ -1,11 +1,10 @@
 use bevy::prelude::*;
-use bevy_renet::renet::RenetClient;
-use tiled_game::{
-    components::Target,
-    network::{messages::client::ClientMessages, ClientChannel},
-};
+use bevy_renet::renet::{DefaultChannel, RenetClient};
+use tiled_game::{components::Target, network::messages::client::ClientMessages};
 
 use crate::game::player::Player;
+
+use super::ServerSideEntity;
 
 // Sync player movement to the server
 pub fn sync_movement(
@@ -25,11 +24,12 @@ pub fn sync_movement(
 
     let msg = bincode::serialize(&msg).unwrap();
 
-    client.send_message(ClientChannel::Input, msg);
+    client.send_message(DefaultChannel::ReliableUnordered, msg);
 }
 
 pub fn sync_target(
-    target_q: Query<&Target, (With<Player>, Or<(Added<Target>, Changed<Target>)>)>,
+    target_q: Query<&Target, (Added<Target>, Changed<Target>)>,
+    target_units: Query<&ServerSideEntity>,
     mut client: ResMut<RenetClient>,
 ) {
     if target_q.is_empty() {
@@ -38,13 +38,15 @@ pub fn sync_target(
 
     let target = target_q.single();
 
+    let target_server_side = target_units.get(target.0).unwrap();
+
     let msg = ClientMessages::Target {
-        target: Some(target.0),
+        target: Some(target_server_side.0),
     };
 
     let msg = bincode::serialize(&msg).unwrap();
 
-    client.send_message(ClientChannel::Input, msg);
+    client.send_message(DefaultChannel::ReliableUnordered, msg);
 }
 
 pub fn sync_target_deselect(
@@ -65,6 +67,6 @@ pub fn sync_target_deselect(
 
         let msg = bincode::serialize(&msg).unwrap();
 
-        client.send_message(ClientChannel::Input, msg);
+        client.send_message(DefaultChannel::ReliableUnordered, msg);
     });
 }

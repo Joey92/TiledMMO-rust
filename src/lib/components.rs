@@ -25,6 +25,9 @@ pub struct Dead;
 #[derive(Component)]
 pub struct InCombat;
 
+#[derive(Component)]
+pub struct Unit(pub String); // With pixel art
+
 // This is a marker component that is added to entities that can right-clicked on.
 #[derive(Component)]
 pub struct Interactable;

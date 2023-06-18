@@ -3,14 +3,11 @@ use bevy::core::Name;
  * Everything that creatures and players have in common
  */
 use bevy::prelude::*;
-use bevy_spatial::KDTreeAccess2D;
+use bevy_spatial::kdtree::KDTree2;
 use tiled_game::components::*;
 
 use super::combat::DoDamageEvent;
 use super::SystemLabels;
-
-#[derive(Component, Default)]
-pub struct Unit;
 
 // A vector that the movement system will try to get to
 #[derive(Component)]
@@ -32,7 +29,7 @@ impl Default for Speed {
 
 // spatial index for fast lookup of nearby entities
 // All units with the Name component are tracked by the spatial index
-pub type UnitsNearby = KDTreeAccess2D<Unit>;
+pub type UnitsNearby = KDTree2<Unit>;
 
 #[derive(Component)]
 pub struct Faction(pub String);
@@ -54,7 +51,7 @@ pub struct UnitBundle {
 }
 
 impl UnitBundle {
-    pub fn new(name: String, transform: Transform) -> Self {
+    pub fn new(name: String, class: String, transform: Transform) -> Self {
         Self {
             name: Name::new(name),
             speed: Speed(1.0),
@@ -67,7 +64,7 @@ impl UnitBundle {
                 transform,
                 ..Default::default()
             },
-            unit: Unit,
+            unit: Unit(class),
         }
     }
 }

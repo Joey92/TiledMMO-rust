@@ -3,7 +3,9 @@ use bevy::prelude::*;
 pub mod components;
 pub mod map;
 pub mod player;
+pub mod spritesheet;
 pub mod systems;
+pub mod unit;
 
 use self::{components::MousePointerTarget, systems::*};
 
@@ -16,8 +18,7 @@ impl Plugin for GamePlugin {
             .add_plugin(player::PlayerPlugin)
             .add_system(set_y_to_z_transform)
             .add_system(cursor_system)
-            .add_system(highlight_entities)
-            .add_system(handle_mouse_rightclick)
-            .add_system(handle_mouse_leftclick);
+            .add_plugin(unit::UnitPlugin)
+            .add_plugin(spritesheet::SpriteSheetPlugin);
     }
 }

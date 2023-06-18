@@ -1,25 +1,21 @@
 use std::{collections::HashMap, net::UdpSocket, time::SystemTime};
 
-use bevy::{
-    app::AppExit,
-    core::Name,
-    log,
-    prelude::*,
-    sprite::{Sprite, SpriteBundle},
-};
+use bevy::{app::AppExit, core::Name, log, prelude::*};
 use bevy_rapier2d::prelude::*;
 use bevy_renet::{
-    client_connected,
-    renet::{ClientAuthentication, RenetClient, RenetError},
+    renet::{
+        transport::{ClientAuthentication, NetcodeClientTransport, NetcodeTransportError},
+        ConnectionConfig, DefaultChannel, RenetClient,
+    },
+    transport::{client_connected, NetcodeClientPlugin},
     RenetClientPlugin,
 };
 use tiled_game::network::{
-    client_connection_config,
     messages::{
         client::ClientMessages,
         server::{ServerMessages, Vitals},
     },
-    ClientChannel, ServerChannel, PROTOCOL_ID,
+    PROTOCOL_ID,
 };
 
 use tiled_game::components::*;
@@ -27,8 +23,11 @@ use tiled_game::components::*;
 use crate::{
     game::{
         components::PlayerEntity,
-        map::tiled::{MapChangeEvent, MapName},
+        map::tiled::MapChangeEvent,
         player::Player,
+        spritesheet::{
+            AnimateDirection, AnimateState, AnimationIndices, AnimationTimer, Facing, MovementState,
+        },
     },
     helpers::camera::CameraTarget,
 };
@@ -37,10 +36,11 @@ use self::sync::*;
 
 mod sync;
 
-fn new_renet_client() -> RenetClient {
+fn new_renet_client() -> (RenetClient, NetcodeClientTransport) {
+    let client = RenetClient::new(ConnectionConfig::default());
+
     let server_addr = "127.0.0.1:3387".parse().expect("Invalid server address");
     let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind socket");
-    let connection_config = client_connection_config();
     let current_time = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap();
@@ -52,11 +52,13 @@ fn new_renet_client() -> RenetClient {
         user_data: None,
     };
 
-    RenetClient::new(current_time, socket, connection_config, authentication).unwrap()
+    let transport = NetcodeClientTransport::new(current_time, authentication, socket).unwrap();
+
+    (client, transport)
 }
 
 // If any error is found we just panic
-fn panic_on_error_system(mut renet_error: EventReader<RenetError>) {
+fn panic_on_error_system(mut renet_error: EventReader<NetcodeTransportError>) {
     for e in renet_error.iter() {
         panic!("{}", e);
     }
@@ -79,8 +81,12 @@ pub struct NetworkPlugin;
 
 impl Plugin for NetworkPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugin(RenetClientPlugin::default())
-            .insert_resource(new_renet_client())
+        let (client, transport) = new_renet_client();
+
+        app.add_plugin(RenetClientPlugin)
+            .add_plugin(NetcodeClientPlugin)
+            .insert_resource(client)
+            .insert_resource(transport)
             .init_resource::<ClientState>()
             .add_systems(
                 (
@@ -99,12 +105,14 @@ impl Plugin for NetworkPlugin {
 fn handle_server_messages(
     mut client: ResMut<RenetClient>,
     mut client_state: ResMut<ClientState>,
+    asset_server: Res<AssetServer>,
+    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
     mut commands: Commands,
     mut send_map_change: EventWriter<MapChangeEvent>,
     mut player: Query<(&mut Transform, With<Player>)>,
 ) {
     // let client_id = client.client_id();
-    while let Some(message) = client.receive_message(ServerChannel::ServerMessages) {
+    while let Some(message) = client.receive_message(DefaultChannel::ReliableUnordered) {
         let server_message: Option<ServerMessages> = bincode::deserialize(&message).ok();
         if server_message.is_none() {
             log::error!("Failed to deserialize server message");
@@ -136,7 +144,7 @@ fn handle_server_messages(
                     entity: server_entity,
                 };
                 let msg = bincode::serialize(&msg).unwrap();
-                client.send_message(ClientChannel::Input, msg);
+                client.send_message(DefaultChannel::ReliableUnordered, msg);
             }
             ServerMessages::EntityInfo {
                 entity: server_entity,
@@ -150,6 +158,8 @@ fn handle_server_messages(
                 max_mana,
                 threat,
                 interactable,
+                unit,
+                rotation,
             } => {
                 let client_entity = client_state
                     .server_client_entity_mapping
@@ -162,22 +172,19 @@ fn handle_server_messages(
 
                 let mut cmd = commands.entity(*client_entity.unwrap());
 
-                let color = if friendly {
-                    Color::rgb(0.25, 0.75, 0.25)
-                } else {
-                    Color::rgb(0.75, 0.25, 0.25)
-                };
+                let texture: Handle<Image> = asset_server.load(format!("maps/assets/{}.png", unit));
+                let texture_atlas =
+                    TextureAtlas::from_grid(texture, Vec2::new(24.0, 24.0), 3, 4, None, None);
+                let texture_atlas_handle = texture_atlases.add(texture_atlas);
+                // Use only the subset of sprites in the sheet that make up the run animation
+                let animation_indices = AnimationIndices { rows: 4, cols: 3 };
 
                 cmd.insert((
-                    MapName(name.clone()),
-                    Name::new(name),
-                    SpriteBundle {
-                        transform: Transform::from_translation(pos),
-                        sprite: Sprite {
-                            color,
-                            custom_size: Some(Vec2::new(50.0, 100.0)),
-                            ..default()
-                        },
+                    Name::new(name.clone()),
+                    SpriteSheetBundle {
+                        transform: Transform::from_translation(pos).with_rotation(rotation),
+                        texture_atlas: texture_atlas_handle,
+                        sprite: TextureAtlasSprite::new(0),
                         ..default()
                     },
                     Health(health),
@@ -185,7 +192,27 @@ fn handle_server_messages(
                     Mana(mana),
                     MaxMana(max_mana),
                     Threat(threat.unwrap_or(ThreatMap::default())),
+                    AnimationTimer(Timer::from_seconds(0.5, TimerMode::Repeating)),
+                    animation_indices,
+                    AnimateDirection(Facing::Down),
+                    AnimateState(MovementState::Idle),
                 ));
+
+                let font = asset_server.load("maps/assets/OpenSans-Regular.ttf");
+                let text_style = TextStyle {
+                    font,
+                    font_size: 16.0,
+                    color: Color::BLACK,
+                };
+
+                cmd.with_children(|c| {
+                    c.spawn(Text2dBundle {
+                        transform: Transform::from_translation(Vec3::new(0.0, 20.0, 0.0)),
+                        text: Text::from_section(name.clone(), text_style.clone())
+                            .with_alignment(TextAlignment::Center),
+                        ..default()
+                    });
+                });
 
                 if is_player {
                     cmd.insert(PlayerEntity);
@@ -198,6 +225,7 @@ fn handle_server_messages(
             ServerMessages::Move {
                 entity: server_entity,
                 pos,
+                rotation,
             } => {
                 let client_side_entity = client_state
                     .server_client_entity_mapping
@@ -209,45 +237,69 @@ fn handle_server_messages(
                         .entity(*client_side_entity)
                         // todo: entities bounce between z index 0 and their correct position
                         // causing them to flicker when the player is behind them
-                        .insert(Transform::from_translation(pos));
+                        .insert(Transform::from_translation(pos).with_rotation(rotation));
                 }
             }
             ServerMessages::PlayerInfo {
                 entity: server_entity,
                 pos,
+                img,
             } => {
                 client_state.player_entity = Some(server_entity);
-                let client_entity = commands
-                    .spawn((
-                        Player,
-                        ServerSideEntity(server_entity),
-                        RigidBody::Dynamic,
-                        GravityScale(0.0),
-                        Restitution {
-                            coefficient: 0.,
-                            combine_rule: CoefficientCombineRule::Min,
-                        },
-                        LockedAxes::ROTATION_LOCKED,
-                        SpriteBundle {
-                            transform: Transform::from_translation(pos),
-                            sprite: Sprite {
-                                color: Color::rgb(0., 0.25, 0.75),
-                                custom_size: Some(Vec2::new(40.0, 40.0)),
 
-                                ..default()
-                            },
+                let texture: Handle<Image> = asset_server.load(format!("maps/assets/{}.png", img));
+                let texture_atlas =
+                    TextureAtlas::from_grid(texture, Vec2::new(24.0, 24.0), 3, 4, None, None);
+                let texture_atlas_handle = texture_atlases.add(texture_atlas);
+                // Use only the subset of sprites in the sheet that make up the run animation
+                let animation_indices = AnimationIndices { rows: 4, cols: 3 };
+                let name = Name::new("player");
 
-                            ..default()
-                        },
-                        Collider::cuboid(20., 20.),
-                        Name::new("player"),
-                        CameraTarget,
-                    ))
-                    .id();
+                let mut cmd = commands.spawn((
+                    Player,
+                    ServerSideEntity(server_entity),
+                    RigidBody::Dynamic,
+                    GravityScale(0.0),
+                    Damping {
+                        linear_damping: 1.,
+                        angular_damping: 1.,
+                    },
+                    Ccd::enabled(),
+                    LockedAxes::ROTATION_LOCKED,
+                    SpriteSheetBundle {
+                        transform: Transform::from_translation(pos),
+                        texture_atlas: texture_atlas_handle,
+                        sprite: TextureAtlasSprite::new(0),
+                        ..default()
+                    },
+                    Collider::cuboid(8., 8.),
+                    name.clone(),
+                    CameraTarget,
+                    AnimationTimer(Timer::from_seconds(0.5, TimerMode::Repeating)),
+                    animation_indices,
+                    AnimateDirection(Facing::Down),
+                    AnimateState(MovementState::Idle),
+                ));
+
+                let font = asset_server.load("maps/assets/OpenSans-Regular.ttf");
+                let text_style = TextStyle {
+                    font,
+                    font_size: 16.0,
+                    color: Color::BLACK,
+                };
+
+                cmd.with_children(|c| {
+                    c.spawn(Text2dBundle {
+                        transform: Transform::from_translation(Vec3::new(0.0, 20.0, 0.0)),
+                        text: Text::from_section(name.clone(), text_style.clone())
+                            .with_alignment(TextAlignment::Center),
+                        ..default()
+                    });
+                });
 
                 client_state
                     .server_client_entity_mapping
-                    .insert(server_entity, client_entity);
+                    .insert(server_entity, cmd.id());
             }
             ServerMessages::EntityList {
                 entities: server_entities,
@@ -264,7 +316,7 @@ fn handle_server_messages(
                         entity: server_entity,
                     };
                     let msg = bincode::serialize(&msg).unwrap();
-                    client.send_message(ClientChannel::Input, msg);
+                    client.send_message(DefaultChannel::ReliableUnordered, msg);
                 }
             }
             ServerMessages::Map { name, position } => {
@@ -348,7 +400,7 @@ fn disconnect_on_exit(exit: EventReader<AppExit>, mut client: ResMut<RenetClient
     if !exit.is_empty() {
         let msg = ClientMessages::Disconnect;
         let msg = bincode::serialize(&msg).unwrap();
-        client.send_message(ClientChannel::Input, msg);
+        client.send_message(DefaultChannel::ReliableUnordered, msg);
         client.disconnect();
     }
 }
