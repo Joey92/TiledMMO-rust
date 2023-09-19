@@ -7,6 +7,7 @@ use crate::network::ServerSideEntity;
 use super::{
     components::{Highlighted, MousePointerTarget},
     player::PlayerTarget,
+    spritesheet::{deg_to_facing, AnimateDirection},
 };
 
 pub struct UnitPlugin;
@@ -19,7 +20,8 @@ impl Plugin for UnitPlugin {
             .add_system(handle_mouse_rightclick)
             .add_system(handle_mouse_leftclick)
             .add_system(target_name)
-            .add_system(untarget_name);
+            .add_system(untarget_name)
+            .add_system(set_unit_previous_pos);
     }
 }
 
@@ -188,4 +190,26 @@ pub fn handle_mouse_leftclick(
     // select the first entity as a target
     let client_side_entity = highlighted_entities.iter().next().unwrap();
     cmd.entity(client_side_entity).insert(PlayerTarget);
+}
+
+#[derive(Component)]
+pub struct PreviousPos(pub Vec3);
+
+pub fn set_unit_previous_pos(
+    mut units: Query<(&mut AnimateDirection, Ref<Transform>, &mut PreviousPos), Changed<Transform>>,
+) {
+    for (mut direction, transform, mut previous_pos) in units.iter_mut() {
+        // measure angle between previous position and current position
+        let diff = Vec3::ZERO + transform.translation - previous_pos.0;
+
+        let mut angle = diff.angle_between(Vec3::X).to_degrees();
+
+        if diff.y < 0. {
+            angle += 180.;
+        }
+
+        println!("angle: {}", angle);
+        *direction = AnimateDirection(deg_to_facing(angle));
+        *previous_pos = PreviousPos(transform.translation);
+    }
 }

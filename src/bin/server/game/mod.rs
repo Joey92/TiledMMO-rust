@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 use bevy_spatial::{AutomaticUpdate, SpatialStructure};
 use tiled_game::components::Unit;
@@ -20,30 +21,21 @@ use self::player::*;
 use self::scripts::ScriptsPlugin;
 use self::unit::UnitPlugin;
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, SystemSet)]
-pub enum SystemLabels {
-    // NetworkRead,
-    // Movement,
-    Damage,
-    // Combat,
-    NetworkPrepare,
-}
-
 pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugin(
+        app.add_plugins(
             AutomaticUpdate::<Unit>::new()
                 .with_spatial_ds(SpatialStructure::KDTree2)
                 .with_frequency(Duration::from_millis(300)),
         ) // track everything that has the unit marker in a spatial index
-        .add_plugin(UnitPlugin)
-        .add_plugin(NPCPlugin)
-        .add_plugin(PlayerPlugin)
-        .add_plugin(MapsPlugin)
-        .add_plugin(CombatPlugin)
-        .add_plugin(ScriptsPlugin)
-        .add_plugin(InteractionPlugin);
+        .add_plugins(UnitPlugin)
+        .add_plugins(NPCPlugin)
+        .add_plugins(PlayerPlugin)
+        .add_plugins(MapsPlugin)
+        .add_plugins(CombatPlugin)
+        .add_plugins(ScriptsPlugin)
+        .add_plugins(InteractionPlugin);
     }
 }

@@ -8,9 +8,9 @@ use bevy::{
 use bevy_rapier2d::prelude::Collider;
 use tiled::{LayerType, ObjectShape};
 
-use crate::game::map::tiled::MapName;
+use crate::game::map::MapName;
 
-use super::tiled::{CurrentMap, TiledMap};
+use super::{tiled::TiledMap, CurrentMap};
 
 /**
  * Calculate collisions when a new tilemap gets loaded
@@ -59,7 +59,7 @@ pub fn load_collision(
                     .and_then(|layer| {
                         // match as ObjectLayer and give back Result
                         match layer.layer_type() {
-                            LayerType::ObjectLayer(layer) => Some(layer),
+                            LayerType::Objects(layer) => Some(layer),
                             _ => None,
                         }
                     })

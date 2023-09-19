@@ -1,5 +1,3 @@
-use std::f32::consts::PI;
-
 use bevy::prelude::*;
 use tiled_game::{
     components::*,
@@ -173,6 +171,7 @@ pub fn send_movement(
     }
 }
 
+#[derive(Event)]
 pub struct SendEntityInfoEvent {
     pub client_id: u64,
     pub entity: Entity,

@@ -39,6 +39,7 @@ pub struct MapInstanceEntity(pub Entity);
 #[derive(Component, Debug)]
 pub struct NPCList(HashSet<Entity>);
 
+#[derive(Event)]
 pub struct Teleport {
     pub entity: Entity,
     pub map: String,
@@ -68,18 +69,20 @@ pub struct MapsPlugin;
 
 impl Plugin for MapsPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.add_startup_system(map_manager)
+        app.add_systems(Startup, setup_map_manager)
             // Handle despawn of entities
             .add_event::<DespawnEvent>()
             .add_event::<Teleport>()
             // removes map instances with no players in certain intervals
-            .add_system(map_instance_cleanup)
-            // teleports players between map instances
-            .add_system(handle_teleport)
-            // sends all units to the client
-            .add_system(send_map_instance_entities)
-            // Spawns NPCs on new map instances
-            .add_system(spawn_units);
+            .add_systems(
+                Update,
+                (
+                    map_instance_cleanup,
+                    handle_teleport,
+                    send_map_instance_entities,
+                    spawn_units,
+                ),
+            );
 
         #[cfg(feature = "verbose-output")]
         {
@@ -88,7 +91,7 @@ impl Plugin for MapsPlugin {
     }
 }
 
-fn map_manager(mut commands: Commands) {
+fn setup_map_manager(mut commands: Commands) {
     let mut map_manager = MapManager::new();
 
     let dir = "maps";
@@ -179,6 +182,7 @@ fn map_instance_cleanup(
 }
 
 // Despawns an entity on the client side
+#[derive(Event)]
 pub struct DespawnEvent {
     pub entity: Entity,
     pub map: Entity,
@@ -301,7 +305,7 @@ fn spawn_units(
                 .flat_map(|layer| {
                     // match as ObjectLayer and give back Result
                     match layer.layer_type() {
-                        tiled::LayerType::ObjectLayer(layer) => Some(layer),
+                        tiled::LayerType::Objects(layer) => Some(layer),
                         _ => None,
                     }
                 })

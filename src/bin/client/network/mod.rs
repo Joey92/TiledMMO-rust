@@ -23,11 +23,12 @@ use tiled_game::components::*;
 use crate::{
     game::{
         components::PlayerEntity,
-        map::tiled::MapChangeEvent,
+        map::MapChangeEvent,
         player::Player,
         spritesheet::{
             AnimateDirection, AnimateState, AnimationIndices, AnimationTimer, Facing, MovementState,
         },
+        unit::PreviousPos,
     },
     helpers::camera::CameraTarget,
 };
@@ -79,26 +80,31 @@ struct ClientState {
 
 pub struct NetworkPlugin;
 
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct Connected;
+
 impl Plugin for NetworkPlugin {
     fn build(&self, app: &mut App) {
         let (client, transport) = new_renet_client();
 
-        app.add_plugin(RenetClientPlugin)
-            .add_plugin(NetcodeClientPlugin)
+        app.configure_set(Update, Connected.run_if(client_connected()));
+
+        app.add_plugins(RenetClientPlugin)
+            .add_plugins(NetcodeClientPlugin)
             .insert_resource(client)
             .insert_resource(transport)
             .init_resource::<ClientState>()
             .add_systems(
+                Update,
                 (
                     handle_server_messages,
                     sync_movement,
                     sync_target,
                     sync_target_deselect,
                 )
-                    .distributive_run_if(client_connected),
+                    .in_set(Connected),
             )
-            .add_system(disconnect_on_exit)
-            .add_system(panic_on_error_system);
+            .add_systems(PostUpdate, (disconnect_on_exit, panic_on_error_system));
     }
 }
 
@@ -172,7 +178,7 @@ fn handle_server_messages(
 
                 let mut cmd = commands.entity(*client_entity.unwrap());
 
-                let texture: Handle<Image> = asset_server.load(format!("maps/assets/{}.png", unit));
+                let texture: Handle<Image> = asset_server.load(format!("images/{}.png", unit));
                 let texture_atlas =
                     TextureAtlas::from_grid(texture, Vec2::new(24.0, 24.0), 3, 4, None, None);
                 let texture_atlas_handle = texture_atlases.add(texture_atlas);
@@ -192,13 +198,14 @@ fn handle_server_messages(
                     Mana(mana),
                     MaxMana(max_mana),
                     Threat(threat.unwrap_or(ThreatMap::default())),
-                    AnimationTimer(Timer::from_seconds(0.5, TimerMode::Repeating)),
+                    AnimationTimer(Timer::from_seconds(0.1, TimerMode::Repeating)),
                     animation_indices,
                     AnimateDirection(Facing::Down),
                     AnimateState(MovementState::Idle),
+                    PreviousPos(pos),
                 ));
 
-                let font = asset_server.load("maps/assets/OpenSans-Regular.ttf");
+                let font = asset_server.load("OpenSans-Regular.ttf");
                 let text_style = TextStyle {
                     font,
                     font_size: 16.0,
@@ -247,7 +254,7 @@ fn handle_server_messages(
             } => {
                 client_state.player_entity = Some(server_entity);
 
-                let texture: Handle<Image> = asset_server.load(format!("maps/assets/{}.png", img));
+                let texture: Handle<Image> = asset_server.load(format!("images/{}.png", img));
                 let texture_atlas =
                     TextureAtlas::from_grid(texture, Vec2::new(24.0, 24.0), 3, 4, None, None);
                 let texture_atlas_handle = texture_atlases.add(texture_atlas);
@@ -281,7 +288,9 @@ fn handle_server_messages(
                     AnimateState(MovementState::Idle),
                 ));
 
-                let font = asset_server.load("maps/assets/OpenSans-Regular.ttf");
+                cmd.insert(PreviousPos(pos));
+
+                let font = asset_server.load("OpenSans-Regular.ttf");
                 let text_style = TextStyle {
                     font,
                     font_size: 16.0,

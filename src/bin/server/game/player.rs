@@ -19,7 +19,7 @@ pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_system(player_join).add_system(player_logout);
+        app.add_systems(Update, (player_logout, player_join));
     }
 }
 

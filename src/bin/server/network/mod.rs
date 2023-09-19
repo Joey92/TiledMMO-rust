@@ -21,7 +21,7 @@ use tiled_game::{
 
 use sync_systems::*;
 
-use crate::game::{player::LoggingOut, SystemLabels};
+use crate::game::player::LoggingOut;
 
 #[derive(Component, Debug)]
 pub struct NetworkClientId(pub u64);
@@ -31,6 +31,7 @@ pub struct NetworkResource {
     player_entity_map: std::collections::HashMap<u64, Entity>,
 }
 
+#[derive(Event)]
 pub struct SendServerMessageEvent {
     pub client_id: Option<u64>,
     pub message: ServerMessages,
@@ -43,14 +44,24 @@ impl Plugin for NetworkPlugin {
         let (server, transport) = new_renet_server();
         app
             // Initialize Network
-            .add_plugin(RenetServerPlugin)
-            .add_plugin(NetcodeServerPlugin)
+            .add_event::<SendServerMessageEvent>()
+            .add_event::<SendEntityInfoEvent>()
             .insert_resource(server)
             .insert_resource(transport)
             .insert_resource(NetworkResource::default())
-            .add_event::<SendServerMessageEvent>()
-            .add_event::<SendEntityInfoEvent>()
+            .add_plugins(RenetServerPlugin)
+            .add_plugins(NetcodeServerPlugin)
+            // Receive Server Events
             .add_systems(
+                PreUpdate,
+                (
+                    handle_connection_events,
+                    handle_client_messages.after(handle_connection_events),
+                ),
+            )
+            .add_systems(Update, send_message_system)
+            .add_systems(
+                PostUpdate,
                 (
                     send_movement,
                     send_despawn,
@@ -61,14 +72,9 @@ impl Plugin for NetworkPlugin {
                     send_spawn,
                     send_exit_combat,
                     send_entity_info,
-                )
-                    .in_set(SystemLabels::NetworkPrepare),
+                ),
             )
-            // Receive Server Events
-            .add_system(handle_connection_events.in_base_set(CoreSet::PreUpdate))
-            .add_system(handle_client_messages.after(handle_connection_events))
-            .add_system(send_message_system.after(SystemLabels::NetworkPrepare))
-            .add_system(disconnect_clients_on_exit);
+            .add_systems(PostUpdate, disconnect_clients_on_exit);
     }
 }
 

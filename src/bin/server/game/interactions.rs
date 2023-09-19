@@ -8,11 +8,12 @@ pub struct InteractionPlugin;
 impl Plugin for InteractionPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<EntityInteractionEvent>()
-            .add_system(portal_interaction);
+            .add_systems(Update, portal_interaction);
     }
 }
 
 // Whenever a player interacts with an entity, this event is fired.
+#[derive(Event)]
 pub struct EntityInteractionEvent {
     pub target: Entity,
     pub source: Entity,

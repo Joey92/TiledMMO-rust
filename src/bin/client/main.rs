@@ -2,7 +2,9 @@ mod game;
 mod helpers;
 mod network;
 
-use bevy::{ prelude::*};
+use std::time::Duration;
+
+use bevy::{asset::ChangeWatcher, prelude::*};
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use bevy_rapier2d::prelude::*;
 
@@ -16,23 +18,24 @@ fn main() {
         DefaultPlugins
             .set(ImagePlugin::default_nearest())
             .set(AssetPlugin {
-                watch_for_changes: true,
-                asset_folder: String::from(""),
+                watch_for_changes: ChangeWatcher::with_delay(Duration::from_millis(200)),
                 ..default()
             }),
     )
-    .add_plugin(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
-    .add_plugin(game::GamePlugin)
-    .add_plugin(NetworkPlugin)
-    .add_startup_system(setup_graphics)
-    .add_system(helpers::camera::movement)
-    .add_system(bevy::window::close_on_esc);
+    .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
+    .add_plugins(game::GamePlugin)
+    .add_plugins(NetworkPlugin)
+    .add_systems(Startup, setup_graphics)
+    .add_systems(
+        Update,
+        (helpers::camera::movement, bevy::window::close_on_esc),
+    );
 
     #[cfg(debug_assertions)]
     {
         app.register_type::<Threat>()
-            .add_plugin(WorldInspectorPlugin::new())
-            .add_plugin(RapierDebugRenderPlugin::default());
+            .add_plugins(WorldInspectorPlugin::new())
+            .add_plugins(RapierDebugRenderPlugin::default());
     }
 
     app.run();

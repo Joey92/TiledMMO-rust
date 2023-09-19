@@ -12,20 +12,35 @@
 //   * When the 'atlas' feature is enabled tilesets using a collection of images will be skipped.
 //   * Only finite tile layers are loaded. Infinite tile layers and object layers will be skipped.
 
-use std::io::BufReader;
+use std::io::Cursor;
+use std::path::Path;
+use std::sync::Arc;
 
 use bevy::{
     asset::{AssetLoader, AssetPath, LoadedAsset},
     log,
     prelude::*,
-    reflect::TypeUuid,
+    reflect::{TypePath, TypeUuid},
     utils::HashMap,
 };
 use bevy_ecs_tilemap::prelude::*;
 
 use anyhow::Result;
 
-#[derive(TypeUuid)]
+use super::{CurrentMap, MapName};
+
+#[derive(Default)]
+pub struct TiledMapPlugin;
+
+impl Plugin for TiledMapPlugin {
+    fn build(&self, app: &mut bevy::prelude::App) {
+        app.add_asset::<TiledMap>()
+            .add_asset_loader(TiledLoader)
+            .add_systems(Update, process_loaded_maps);
+    }
+}
+
+#[derive(TypeUuid, TypePath)]
 #[uuid = "e51081d0-6168-4881-a1c6-4249b2000d7f"]
 pub struct TiledMap {
     pub map: tiled::Map,
@@ -51,6 +66,28 @@ pub struct TiledMapBundle {
     pub global_transform: GlobalTransform,
 }
 
+struct BytesResourceReader {
+    bytes: Arc<[u8]>,
+}
+
+impl BytesResourceReader {
+    fn new(bytes: &[u8]) -> Self {
+        Self {
+            bytes: Arc::from(bytes),
+        }
+    }
+}
+
+impl tiled::ResourceReader for BytesResourceReader {
+    type Resource = Cursor<Arc<[u8]>>;
+    type Error = std::io::Error;
+
+    fn read_from(&mut self, _path: &Path) -> std::result::Result<Self::Resource, Self::Error> {
+        // In this case, the path is ignored because the byte data is already provided.
+        Ok(Cursor::new(self.bytes.clone()))
+    }
+}
+
 pub struct TiledLoader;
 
 impl AssetLoader for TiledLoader {
@@ -67,9 +104,12 @@ impl AssetLoader for TiledLoader {
                 .parent()
                 .expect("The asset load context was empty.");
 
-            let mut loader = tiled::Loader::new();
+            let mut loader = tiled::Loader::with_cache_and_reader(
+                tiled::DefaultResourceCache::new(),
+                BytesResourceReader::new(bytes),
+            );
             let map = loader
-                .load_tmx_map_from(BufReader::new(bytes), load_context.path())
+                .load_tmx_map(load_context.path())
                 .map_err(|e| anyhow::anyhow!("Could not load TMX map: {e}"))?;
 
             let mut dependencies = Vec::new();
@@ -91,8 +131,7 @@ impl AssetLoader for TiledLoader {
                             let mut tile_images: Vec<Handle<Image>> = Vec::new();
                             for (tile_id, tile) in tileset.tiles() {
                                 if let Some(img) = &tile.image {
-                                    let tile_path =
-                                        tmx_dir.join(&img.source.canonicalize().unwrap());
+                                    let tile_path = tmx_dir.join(&img.source);
                                     let asset_path = AssetPath::new(tile_path, None);
                                     log::info!("Loading tile image from {asset_path:?} as image ({tileset_index}, {tile_id})");
                                     let texture: Handle<Image> =
@@ -108,7 +147,7 @@ impl AssetLoader for TiledLoader {
                         }
                     }
                     Some(img) => {
-                        let tile_path = tmx_dir.join(&img.source.canonicalize().unwrap());
+                        let tile_path = tmx_dir.join(&img.source);
                         let asset_path = AssetPath::new(tile_path, None);
                         let texture: Handle<Image> = load_context.get_handle(asset_path.clone());
                         dependencies.push(asset_path);
@@ -136,48 +175,11 @@ impl AssetLoader for TiledLoader {
     }
 
     fn extensions(&self) -> &[&str] {
-        static EXTENSIONS: &[&str] = &["tmx"];
+        static EXTENSIONS: &[&str] = &["tmx", "tsx"];
         EXTENSIONS
     }
 }
 
-#[derive(Resource, Default)]
-pub struct CurrentMap {
-    pub name: String,
-    pub player_plane_z: Option<i8>,
-}
-
-/**
- * Insert this component to every entity that should be unloaded on a map change.
- */
-#[derive(Component)]
-pub struct MapName(pub String);
-
-// This system removes all entities with the MapName component that do not match the currently active map.
-pub fn unload_map(
-    mut commands: Commands,
-    current_map_name: Res<CurrentMap>,
-    map_entities: Query<(Entity, &MapName)>,
-) {
-    if !current_map_name.is_changed() {
-        return;
-    }
-
-    for (layer_entity, map_name) in map_entities.iter() {
-        if map_name.0 == current_map_name.name {
-            continue;
-        }
-
-        commands.entity(layer_entity).despawn_recursive();
-    }
-
-    info!("Unloaded previous map entities");
-}
-
-/*
-   This system is responsible for loading new maps and updating existing maps.
-   It is also responsible for spawning the tiles for each layer.
-*/
 pub fn process_loaded_maps(
     mut commands: Commands,
     mut map_events: EventReader<AssetEvent<TiledMap>>,
@@ -187,7 +189,7 @@ pub fn process_loaded_maps(
     mut map_query: Query<(&Handle<TiledMap>, &mut TiledLayersStorage)>,
     new_maps: Query<&Handle<TiledMap>, Added<Handle<TiledMap>>>,
 ) {
-    let mut changed_maps = Vec::<Handle<TiledMap>>::new();
+    let mut changed_maps = Vec::<Handle<TiledMap>>::default();
     for event in map_events.iter() {
         match event {
             AssetEvent::Created { handle } => {
@@ -202,13 +204,14 @@ pub fn process_loaded_maps(
                 log::info!("Map removed!");
                 // if mesh was modified and removed in the same update, ignore the modification
                 // events are ordered so future modification events are ok
-                changed_maps.retain(|h| h != handle)
+                changed_maps.retain(|changed_handle| changed_handle == handle);
             }
         }
     }
 
-    for new_maps in new_maps.iter() {
-        changed_maps.push(new_maps.clone_weak());
+    // If we have new map entities add them to the changed_maps list.
+    for new_map_handle in new_maps.iter() {
+        changed_maps.push(new_map_handle.clone_weak());
     }
 
     for changed_map in changed_maps.iter() {
@@ -217,7 +220,6 @@ pub fn process_loaded_maps(
             if map_handle != changed_map {
                 continue;
             }
-
             if let Some(tiled_map) = maps.get(map_handle) {
                 // TODO: Create a RemoveMap component..
                 for layer_entity in layer_storage.storage.values() {
@@ -235,12 +237,11 @@ pub fn process_loaded_maps(
                 // tilesets on each layer and allows differently-sized tile images in each tileset,
                 // this means we need to load each combination of tileset and layer separately.
                 for (tileset_index, tileset) in tiled_map.map.tilesets().iter().enumerate() {
-                    let Some(tilemap_texture) = tiled_map
-                        .tilemap_textures
-                        .get(&tileset_index) else {
-                            log::warn!("Skipped creating layer with missing tilemap textures.");
-                            continue;
-                        };
+                    let Some(tilemap_texture) = tiled_map.tilemap_textures.get(&tileset_index)
+                    else {
+                        log::warn!("Skipped creating layer with missing tilemap textures.");
+                        continue;
+                    };
 
                     let tile_size = TilemapTileSize {
                         x: tileset.tile_width as f32,
@@ -257,7 +258,7 @@ pub fn process_loaded_maps(
                         let offset_x = layer.offset_x;
                         let offset_y = layer.offset_y;
 
-                        let tiled::LayerType::TileLayer(tile_layer) = layer.layer_type() else {
+                        let tiled::LayerType::Tiles(tile_layer) = layer.layer_type() else {
                             log::info!(
                                 "Skipping layer {} because only tile layers are supported.",
                                 layer.id()
@@ -301,10 +302,8 @@ pub fn process_loaded_maps(
 
                         for x in 0..map_size.x {
                             for y in 0..map_size.y {
-                                let mut mapped_y = y;
-                                if tiled_map.map.orientation == tiled::Orientation::Orthogonal {
-                                    mapped_y = (tiled_map.map.height - 1) - y;
-                                }
+                                // Transform TMX coords into bevy coords.
+                                let mapped_y = tiled_map.map.height - 1 - y;
 
                                 let mapped_x = x as i32;
                                 let mapped_y = mapped_y as i32;
@@ -349,7 +348,6 @@ pub fn process_loaded_maps(
                                         },
                                         ..Default::default()
                                     })
-                                    .insert(Name::new("Tile"))
                                     .id();
                                 tile_storage.set(&tile_pos, tile_entity);
                             }
@@ -391,36 +389,5 @@ pub fn process_loaded_maps(
                 }
             }
         }
-    }
-}
-
-/**
- * Send this event when you want to change the map.
- */
-pub struct MapChangeEvent {
-    pub map_name: String,
-}
-
-pub fn change_map(
-    mut commands: Commands,
-    mut map_events: EventReader<MapChangeEvent>,
-    asset_server: Res<AssetServer>,
-) {
-    for event in map_events.iter() {
-        log::info!("Changing map to {}", event.map_name);
-
-        commands.insert_resource(CurrentMap {
-            name: event.map_name.clone(),
-            ..default()
-        });
-
-        let map_handle: Handle<TiledMap> = asset_server.load(format!("maps/{}", event.map_name));
-
-        commands
-            .spawn(TiledMapBundle {
-                tiled_map: map_handle,
-                ..Default::default()
-            })
-            .insert(MapName(event.map_name.clone()));
     }
 }

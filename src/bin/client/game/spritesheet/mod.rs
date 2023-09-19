@@ -55,7 +55,7 @@ pub fn animate_sprite(
         &AnimationIndices,
         &mut AnimationTimer,
         &mut TextureAtlasSprite,
-        &AnimateDirection,
+        Ref<AnimateDirection>,
         Ref<AnimateState>,
     )>,
 ) {
@@ -73,7 +73,7 @@ pub fn animate_sprite(
         // so you need to use -1 and + 1 to get the walking frames
         let idle_direction = row_pos * (indices.rows - 1) + 1;
 
-        if state.is_changed() {
+        if state.is_changed() || dir.is_changed() {
             sprite.index = idle_direction;
 
             if state.0 == MovementState::Moving {

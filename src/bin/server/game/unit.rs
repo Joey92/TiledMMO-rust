@@ -7,7 +7,6 @@ use bevy_spatial::kdtree::KDTree2;
 use tiled_game::components::*;
 
 use super::combat::DoDamageEvent;
-use super::SystemLabels;
 
 // A vector that the movement system will try to get to
 #[derive(Component)]
@@ -74,16 +73,21 @@ pub struct UnitPlugin;
 impl Plugin for UnitPlugin {
     fn build(&self, app: &mut App) {
         // Updates movement of entities
-        app.add_system(movement_system)
-            .add_system(follow_system)
-            .insert_resource(HealthRecoveryTimer(Timer::from_seconds(
-                2.,
-                TimerMode::Repeating,
-            )))
-            .add_system(health_recovery_system)
-            .add_event::<DeathEvent>()
-            .add_system(death_system)
-            .add_system(target_on_damage.after(SystemLabels::Damage));
+        app.add_systems(
+            Update,
+            (
+                movement_system,
+                follow_system,
+                health_recovery_system,
+                death_system,
+                target_on_damage,
+            ),
+        )
+        .insert_resource(HealthRecoveryTimer(Timer::from_seconds(
+            2.,
+            TimerMode::Repeating,
+        )))
+        .add_event::<DeathEvent>();
     }
 }
 
@@ -150,6 +154,7 @@ fn health_recovery_system(
     }
 }
 
+#[derive(Event)]
 pub struct DeathEvent {
     pub entity: Entity,
 }

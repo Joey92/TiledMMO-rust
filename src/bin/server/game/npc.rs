@@ -51,16 +51,17 @@ pub struct NPCPlugin;
 
 impl Plugin for NPCPlugin {
     fn build(&self, app: &mut App) {
-        app.add_system(npc_evade_system)
-            .add_system(return_to_home_system.in_base_set(CoreSet::PostUpdate))
-            .add_system(
-                npc_evaded
-                    .in_base_set(CoreSet::PostUpdate)
-                    .after(return_to_home_system),
-            )
-            .add_system(aggro_by_range_system)
-            .add_system(aggro_by_damage_system)
-            .add_system(target_and_follow_highest_threat);
+        app.add_systems(Update, npc_evaded_system)
+            .add_systems(PostUpdate, return_to_home_system)
+            .add_systems(PostUpdate, npc_evaded.after(return_to_home_system))
+            .add_systems(
+                Update,
+                (
+                    aggro_by_range_system,
+                    aggro_by_damage_system,
+                    target_and_follow_highest_threat,
+                ),
+            );
     }
 }
 
@@ -82,15 +83,16 @@ fn return_to_home_system(
 }
 
 // Runs after the NPC stops evading
-fn npc_evaded(mut out_of_combat: RemovedComponents<Evading>) {
+fn npc_evaded(mut out_of_combat: RemovedComponents<Evading>, units: Query<&Name, With<Unit>>) {
     // no need to check if entity is a NPC since only NPCs can evade
     for entity in out_of_combat.iter() {
-        println!("NPC returned home: {:?}", entity);
+        let name = units.get(entity).unwrap();
+        println!("{:?} returned home", name.as_str());
     }
 }
 
 // Check if the NPC has arrived at his home position
-fn npc_evade_system(
+fn npc_evaded_system(
     mut cmd: Commands,
     evading_npcs: Query<(Entity, &Transform, &Home), (With<NPC>, With<Evading>)>,
 ) {
@@ -120,7 +122,7 @@ fn aggro_by_range_system(
         // find all targets in range
         let targets_in_range = units.within_distance(aggro_transform.translation.truncate(), 100.0);
 
-        // // if there are no targets, remove the aggro component
+        // if there are no targets, remove the aggro component
         if targets_in_range.is_empty() {
             // do nothing
             continue;
