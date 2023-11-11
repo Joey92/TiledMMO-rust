@@ -4,7 +4,7 @@ pub struct SpriteSheetPlugin;
 
 impl Plugin for SpriteSheetPlugin {
     fn build(&self, app: &mut App) {
-        app.add_system(animate_sprite);
+        app.add_systems(Update, (animate_sprite, set_animation_direction));
     }
 }
 
@@ -92,5 +92,27 @@ pub fn animate_sprite(
                 idle_direction - 1
             };
         }
+    }
+}
+
+#[derive(Component)]
+pub struct PreviousPos(pub Vec3);
+
+pub fn set_animation_direction(
+    mut units: Query<(&mut AnimateDirection, Ref<Transform>, &mut PreviousPos), Changed<Transform>>,
+) {
+    for (mut direction, transform, mut previous_pos) in units.iter_mut() {
+        // measure angle between previous position and current position
+        let diff = Vec3::ZERO + transform.translation - previous_pos.0;
+
+        let mut angle = diff.angle_between(Vec3::X).to_degrees();
+
+        if diff.y < 0. {
+            angle += 180.;
+        }
+
+        // println!("angle: {}", angle);
+        *direction = AnimateDirection(deg_to_facing(angle));
+        *previous_pos = PreviousPos(transform.translation);
     }
 }

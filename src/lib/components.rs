@@ -1,3 +1,6 @@
+/**
+ * Shared components between client and server
+ */
 use bevy::{
     prelude::{Component, Entity},
     reflect::Reflect,
@@ -26,7 +29,10 @@ pub struct Dead;
 pub struct InCombat;
 
 #[derive(Component)]
-pub struct Unit(pub String); // With pixel art
+pub struct Saying(pub String);
+
+#[derive(Component)]
+pub struct Unit(pub String);
 
 // This is a marker component that is added to entities that can right-clicked on.
 #[derive(Component)]

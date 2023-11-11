@@ -25,13 +25,13 @@ pub fn send_threat(
                 continue;
             }
 
-            server_message.send(SendServerMessageEvent {
-                client_id: Some(client_id.0),
-                message: ServerMessages::Threat {
+            server_message.send(SendServerMessageEvent::directly_to(
+                client_id.0,
+                ServerMessages::Threat {
                     entity,
                     threat: threat.0.clone(),
                 },
-            });
+            ));
         }
     }
 }
@@ -61,13 +61,13 @@ pub fn send_exit_combat(
             .map(|p| p.0);
 
         clients_to_notify.for_each(|client| {
-            server_message.send(SendServerMessageEvent {
-                client_id: Some(client.0),
-                message: ServerMessages::CombatState {
+            server_message.send(SendServerMessageEvent::directly_to(
+                client.0,
+                ServerMessages::CombatState {
                     entity: leave_combat_event.entity,
                     in_combat: false,
                 },
-            });
+            ));
         });
     }
 }
@@ -84,13 +84,13 @@ pub fn send_entered_combat(
             .map(|p| p.0);
 
         clients_to_notify.for_each(|client| {
-            server_message.send(SendServerMessageEvent {
-                client_id: Some(client.0),
-                message: ServerMessages::CombatState {
+            server_message.send(SendServerMessageEvent::directly_to(
+                client.0,
+                ServerMessages::CombatState {
                     entity,
                     in_combat: true,
                 },
-            });
+            ));
         });
     }
 }
@@ -112,10 +112,10 @@ pub fn send_spawn(
                 continue;
             }
 
-            server_message.send(SendServerMessageEvent {
-                client_id: Some(client_id.0),
-                message: ServerMessages::Spawn { entity },
-            });
+            server_message.send(SendServerMessageEvent::directly_to(
+                client_id.0,
+                ServerMessages::Spawn { entity },
+            ));
         }
     }
 }
@@ -134,12 +134,12 @@ pub fn send_despawn(
             .filter(|(_, _, map_instance)| map_instance.get() == despawn.map)
             .for_each(|(_, client_id, _)| {
                 // send despawn event to all players in map
-                server_message.send(SendServerMessageEvent {
-                    client_id: Some(client_id.0),
-                    message: ServerMessages::Despawn {
+                server_message.send(SendServerMessageEvent::directly_to(
+                    client_id.0,
+                    ServerMessages::Despawn {
                         entity: despawn.entity,
                     },
-                });
+                ));
             });
     }
 }
@@ -158,14 +158,14 @@ pub fn send_movement(
             // unless it is charmed
             && (player_entity != moved_entity || charmed.is_some())
             {
-                server_messages.send(SendServerMessageEvent {
-                    client_id: Some(client_id.0),
-                    message: ServerMessages::Move {
+                server_messages.send(SendServerMessageEvent::directly_to(
+                    client_id.0,
+                    ServerMessages::Move {
                         entity: moved_entity,
                         pos: transform.translation,
                         rotation: transform.rotation,
                     },
-                });
+                ));
             }
         }
     }
@@ -211,9 +211,9 @@ pub fn send_entity_info(
                 friend,
                 threat,
                 interactable,
-            )) => SendServerMessageEvent {
-                client_id: Some(event.client_id),
-                message: ServerMessages::EntityInfo {
+            )) => SendServerMessageEvent::directly_to(
+                event.client_id,
+                ServerMessages::EntityInfo {
                     entity,
                     pos: transform.translation,
                     name: name.to_string(),
@@ -228,13 +228,13 @@ pub fn send_entity_info(
                     interactable: interactable.is_some(),
                     rotation: transform.rotation,
                 },
-            },
+            ),
             _ => {
                 // entity doesn't exist.. send a despawn message
-                SendServerMessageEvent {
-                    client_id: Some(event.client_id),
-                    message: ServerMessages::Despawn { entity },
-                }
+                SendServerMessageEvent::directly_to(
+                    event.client_id,
+                    ServerMessages::Despawn { entity },
+                )
             }
         };
 
@@ -247,13 +247,12 @@ pub fn send_death_events(
     mut death_events: EventReader<DeathEvent>,
 ) {
     for death_event in death_events.iter() {
-        server_messages.send(SendServerMessageEvent {
-            client_id: None,
-            message: ServerMessages::Vitals {
+        server_messages.send(SendServerMessageEvent::to_everyone(
+            ServerMessages::Vitals {
                 entity: death_event.entity,
                 vital: Vitals::Dead(true),
             },
-        });
+        ));
     }
 }
 
@@ -271,25 +270,43 @@ pub fn send_vitals_changed(
             // If player and entity parents match, they are on the same map instance
             if player_map_instance.get() == map_instance.get() {
                 if health.is_changed() {
-                    server_messages.send(SendServerMessageEvent {
-                        client_id: Some(client_id.0),
-                        message: ServerMessages::Vitals {
+                    server_messages.send(SendServerMessageEvent::directly_to(
+                        client_id.0,
+                        ServerMessages::Vitals {
                             entity,
                             vital: Vitals::Health(health.0),
                         },
-                    });
+                    ));
                 }
 
                 if mana.is_changed() {
-                    server_messages.send(SendServerMessageEvent {
-                        client_id: Some(client_id.0),
-                        message: ServerMessages::Vitals {
+                    server_messages.send(SendServerMessageEvent::directly_to(
+                        client_id.0,
+                        ServerMessages::Vitals {
                             entity,
                             vital: Vitals::Mana(mana.0),
                         },
-                    });
+                    ));
                 }
             }
         }
+    }
+}
+
+pub fn send_chat(
+    talkers: Query<(Entity, &Transform, Ref<Saying>, &Parent)>,
+
+    mut server_messages: EventWriter<SendServerMessageEvent>,
+) {
+    for (talker, loc, msg, map) in talkers.iter() {
+        server_messages.send(SendServerMessageEvent::to_players_nearby(
+            map.get(),
+            loc.translation.truncate(),
+            100.,
+            ServerMessages::Saying {
+                entity: talker,
+                msg: msg.0.clone(),
+            },
+        ));
     }
 }

@@ -19,9 +19,11 @@ use tiled_game::{
     },
 };
 
+use bevy_spatial::SpatialAccess;
+
 use sync_systems::*;
 
-use crate::game::player::LoggingOut;
+use crate::game::{player::LoggingOut, ClientsNearby};
 
 #[derive(Component, Debug)]
 pub struct NetworkClientId(pub u64);
@@ -31,10 +33,59 @@ pub struct NetworkResource {
     player_entity_map: std::collections::HashMap<u64, Entity>,
 }
 
+pub enum BroadcastType {
+    Direct {
+        client_id: u64,
+    },
+    Nearby {
+        map: Entity,
+        origin: Vec2,
+        range: f32,
+    },
+    Map {
+        map: Entity,
+    },
+    Global,
+}
+
 #[derive(Event)]
 pub struct SendServerMessageEvent {
-    pub client_id: Option<u64>,
+    pub broadcast: BroadcastType,
     pub message: ServerMessages,
+}
+
+impl SendServerMessageEvent {
+    pub fn directly_to(client_id: u64, message: ServerMessages) -> Self {
+        Self {
+            broadcast: BroadcastType::Direct { client_id },
+            message,
+        }
+    }
+    pub fn to_map(map: Entity, message: ServerMessages) -> Self {
+        Self {
+            broadcast: BroadcastType::Map { map },
+            message,
+        }
+    }
+
+    pub fn to_players_nearby(
+        map: Entity,
+        origin: Vec2,
+        range: f32,
+        message: ServerMessages,
+    ) -> Self {
+        Self {
+            broadcast: BroadcastType::Nearby { map, origin, range },
+            message,
+        }
+    }
+
+    pub fn to_everyone(message: ServerMessages) -> Self {
+        Self {
+            broadcast: BroadcastType::Global,
+            message,
+        }
+    }
 }
 
 pub struct NetworkPlugin;
@@ -72,6 +123,7 @@ impl Plugin for NetworkPlugin {
                     send_spawn,
                     send_exit_combat,
                     send_entity_info,
+                    send_chat,
                 ),
             )
             .add_systems(PostUpdate, disconnect_clients_on_exit);
@@ -80,14 +132,51 @@ impl Plugin for NetworkPlugin {
 
 fn send_message_system(
     mut server: ResMut<RenetServer>,
+
+    clients: Query<(&NetworkClientId, &Parent)>,
+    clients_nearby: Res<ClientsNearby>,
     mut send_server_message_event: EventReader<SendServerMessageEvent>,
 ) {
     for event in send_server_message_event.iter() {
-        let message = bincode::serialize(&event.message).unwrap();
+        let message = bincode::serialize(&event.message).expect("Unserializable packet");
 
-        match event.client_id {
-            Some(client) => server.send_message(client, DefaultChannel::ReliableUnordered, message),
-            None => server.broadcast_message(DefaultChannel::ReliableUnordered, message),
+        match event.broadcast {
+            BroadcastType::Direct { client_id } => {
+                server.send_message(client_id, DefaultChannel::ReliableUnordered, message)
+            }
+            BroadcastType::Nearby { map, origin, range } => {
+                // check which clients are nearby on the same map
+                clients_nearby
+                    .within_distance(origin, range)
+                    .iter()
+                    .flat_map(|client| client.1)
+                    .flat_map(|client| clients.get(client))
+                    .filter(|(_, client_map)| map == client_map.get())
+                    .map(|(network_id, _)| network_id.0)
+                    .for_each(|client_id| {
+                        server.send_message(
+                            client_id,
+                            DefaultChannel::ReliableUnordered,
+                            message.clone(),
+                        );
+                    });
+            }
+            BroadcastType::Map { map } => {
+                clients
+                    .iter()
+                    .filter(|(_, client_map)| map == client_map.get())
+                    .map(|(network_id, _)| network_id.0)
+                    .for_each(|client_id| {
+                        server.send_message(
+                            client_id,
+                            DefaultChannel::ReliableUnordered,
+                            message.clone(),
+                        );
+                    });
+            }
+            BroadcastType::Global => {
+                server.broadcast_message(DefaultChannel::ReliableUnordered, message)
+            }
         }
     }
 }
@@ -131,14 +220,14 @@ fn handle_connection_events(
                     .id();
                 client_entities.player_entity_map.insert(*client_id, entity);
 
-                server_message_events.send(SendServerMessageEvent {
-                    client_id: Some(*client_id),
-                    message: ServerMessages::PlayerInfo {
+                server_message_events.send(SendServerMessageEvent::directly_to(
+                    *client_id,
+                    ServerMessages::PlayerInfo {
                         entity,
                         pos: Vec3::new(0., 0., 0.),
                         img: "dreamland/Characters/Character_001".to_string(),
                     },
-                });
+                ));
             }
             ServerEvent::ClientDisconnected { client_id, reason } => {
                 println!("Client disconnected: {}", client_id);

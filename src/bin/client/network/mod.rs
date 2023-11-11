@@ -26,9 +26,9 @@ use crate::{
         map::MapChangeEvent,
         player::Player,
         spritesheet::{
-            AnimateDirection, AnimateState, AnimationIndices, AnimationTimer, Facing, MovementState,
+            AnimateDirection, AnimateState, AnimationIndices, AnimationTimer, Facing,
+            MovementState, PreviousPos,
         },
-        unit::PreviousPos,
     },
     helpers::camera::CameraTarget,
 };
@@ -401,6 +401,9 @@ fn handle_server_messages(
                 tiled_game::network::messages::server::PlayerErrorMessage::ManaTooLow => todo!(),
                 tiled_game::network::messages::server::PlayerErrorMessage::Unusable => todo!(),
             },
+            ServerMessages::Saying { entity, msg } => {
+                println!("{:?} is saying {}", entity, msg);
+            }
         }
     }
 }

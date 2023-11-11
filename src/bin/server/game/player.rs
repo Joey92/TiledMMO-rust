@@ -42,9 +42,9 @@ pub fn player_join(
 
         teleport_event.send(Teleport {
             entity,
-            map: "start.tmx".to_string(),                // todo: db
-            position: Transform::from_xyz(30., 30., 0.), // todo: db
-            map_instance: None,                          // todo: db
+            map: "start.tmx".to_string(),      // todo: db
+            position: Vec3::new(30., 30., 0.), // todo: db
+            map_instance: None,                // todo: db
             prev_map_instance: None,
         });
     }

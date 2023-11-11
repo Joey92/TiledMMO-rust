@@ -15,11 +15,12 @@ use crate::{
     game::{
         interactions::Portal,
         npc::{Enemy, NPCBundle},
+        thinkers::get_thinker,
     },
     network::{NetworkClientId, SendServerMessageEvent},
 };
 
-use super::{player::Player, scripts::handle_add_script};
+use super::player::Player;
 
 #[derive(Component, Debug)]
 pub struct MapName(pub String);
@@ -45,7 +46,7 @@ pub struct Teleport {
     pub map: String,
     pub map_instance: Option<Entity>,
     pub prev_map_instance: Option<Entity>,
-    pub position: Transform,
+    pub position: Vec3,
 }
 
 #[derive(Resource, Default)]
@@ -94,7 +95,7 @@ impl Plugin for MapsPlugin {
 fn setup_map_manager(mut commands: Commands) {
     let mut map_manager = MapManager::new();
 
-    let dir = "maps";
+    let dir = "assets";
     let maps: Vec<String> = fs::read_dir(dir)
         .unwrap()
         .filter(|f| {
@@ -279,17 +280,21 @@ fn handle_teleport(
         // Add player to map instance
         commands
             .entity(teleporting_entity.0)
-            .insert(teleport.position);
+            .insert(Transform::from_xyz(
+                teleport.position.x,
+                teleport.position.y,
+                teleport.position.z,
+            ));
 
         // send map change event to client
         // so it can load the new map
-        server_message.send(SendServerMessageEvent {
-            client_id: Some(teleporting_entity.1 .0),
-            message: ServerMessages::Map {
+        server_message.send(SendServerMessageEvent::directly_to(
+            teleporting_entity.1 .0,
+            ServerMessages::Map {
                 name: teleport.map.clone(),
-                position: teleport.position.translation,
+                position: teleport.position,
             },
-        });
+        ));
     }
 }
 
@@ -329,9 +334,12 @@ fn spawn_units(
                         MapInstanceEntity(map_instance_entity),
                     ));
 
-                    obj.properties.get("script").map(|script| match script {
-                        tiled::PropertyValue::StringValue(script_name) => {
-                            handle_add_script(script_name.to_owned(), &mut cmd);
+                    obj.properties.get("thinker").map(|script| match script {
+                        tiled::PropertyValue::StringValue(val) => {
+                            if let Ok(thinker) = get_thinker(val).map_err(|err| println!("{}", err))
+                            {
+                                cmd.insert(thinker);
+                            }
                         }
                         _ => {}
                     });
@@ -429,16 +437,16 @@ fn send_map_instance_entities(
 
         if let Some(npc_list) = npc {
             println!("Sending entity list to client {:?}", client_id.0);
-            server_messages.send(SendServerMessageEvent {
-                client_id: Some(client_id.0),
-                message: ServerMessages::EntityList {
+            server_messages.send(SendServerMessageEvent::directly_to(
+                client_id.0,
+                ServerMessages::EntityList {
                     entities: npc_list
                         .iter()
                         .filter(|e| &player_entity != *e)
                         .copied()
                         .collect(),
                 },
-            });
+            ));
         }
     }
 }

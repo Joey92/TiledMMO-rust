@@ -1,14 +1,15 @@
 // everything that is a NPC
 
 use bevy::prelude::*;
+
 use bevy_spatial::SpatialAccess;
 use tiled_game::components::*;
 
 use super::{
     combat::{DoDamageEvent, LeaveCombatEvent},
-    map,
     player::Player,
-    unit::{Follow, MoveDestination, Speed, UnitBundle, UnitsNearby},
+    unit::{Follow, Move, Speed, UnitBundle},
+    UnitsNearby,
 };
 
 // A vector that represents the NPCs home position
@@ -77,7 +78,7 @@ fn return_to_home_system(
             cmd.entity(npc_entity)
                 .remove::<Target>()
                 .remove::<Follow>()
-                .insert((Evading, MoveDestination(spawn_point.0)));
+                .insert((Evading, Move(spawn_point.0)));
         }
     }
 }

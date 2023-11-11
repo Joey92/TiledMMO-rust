@@ -109,4 +109,11 @@ pub enum ServerMessages {
     PlayerError {
         error: PlayerErrorMessage,
     },
+
+    // Entity is saying something
+    // display a chat bubble or something?
+    Saying {
+        entity: Entity,
+        msg: String,
+    },
 }

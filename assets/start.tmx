@@ -1,13 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<map version="1.9" tiledversion="1.9.2" orientation="orthogonal" renderorder="left-up" width="30" height="20" tilewidth="32" tileheight="32" infinite="0" nextlayerid="11" nextobjectid="18">
+<map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="left-up" width="30" height="20" tilewidth="32" tileheight="32" infinite="0" nextlayerid="11" nextobjectid="18">
  <properties>
   <property name="global_instance" type="bool" value="true"/>
  </properties>
- <tileset firstgid="1" source="tilesets/grass.tsx"/>
- <tileset firstgid="65" source="tilesets/walls.tsx"/>
- <tileset firstgid="321" source="tilesets/structures.tsx"/>
- <tileset firstgid="577" source="tilesets/stone-ground.tsx"/>
- <tileset firstgid="641" source="tilesets/props.tsx"/>
+ <tileset firstgid="1" name="grass" tilewidth="32" tileheight="32" tilecount="64" columns="8">
+  <image source="images/TX Tileset Grass.png" width="256" height="256"/>
+ </tileset>
+ <tileset firstgid="65" name="walls" tilewidth="32" tileheight="32" tilecount="256" columns="16">
+  <image source="images/TX Tileset Wall.png" width="512" height="512"/>
+ </tileset>
+ <tileset firstgid="321" name="structures" tilewidth="32" tileheight="32" tilecount="256" columns="16">
+  <image source="images/TX Struct.png" width="512" height="512"/>
+ </tileset>
+ <tileset firstgid="577" name="stone-ground" tilewidth="32" tileheight="32" tilecount="64" columns="8">
+  <image source="images/TX Tileset Stone Ground.png" width="256" height="256"/>
+ </tileset>
+ <tileset firstgid="641" name="props" tilewidth="32" tileheight="32" tilecount="256" columns="16">
+  <image source="images/TX Props.png" width="512" height="512"/>
+ </tileset>
  <layer id="1" name="Ground" class="Ground" width="30" height="20">
   <data encoding="csv">
 21,8,14,29,31,19,23,5,25,4,29,15,6,16,29,4,2,24,22,25,11,31,17,27,31,23,5,10,6,32,
@@ -105,27 +115,28 @@
 </data>
  </layer>
  <objectgroup id="4" name="collision" class="collision">
-  <object id="1" class="collision" x="257.366" y="128.783" width="254.022" height="189.696"/>
-  <object id="3" class="collision" x="448.453" y="386.479" width="29.2657" height="27.5442"/>
-  <object id="4" class="collision" x="292.657" y="387.34" width="24.9619" height="27.5442"/>
-  <object id="5" class="collision" x="291.796" y="481.162" width="24.9619" height="27.5442"/>
-  <object id="6" class="collision" x="451.036" y="481.162" width="24.1011" height="25.8226"/>
-  <object id="10" class="collision" x="671.971" y="381.896" width="57.6706" height="59.3921"/>
+  <object id="1" type="collision" x="257.366" y="128.783" width="254.022" height="189.696"/>
+  <object id="3" type="collision" x="448.453" y="386.479" width="29.2657" height="27.5442"/>
+  <object id="4" type="collision" x="292.657" y="387.34" width="24.9619" height="27.5442"/>
+  <object id="5" type="collision" x="291.796" y="481.162" width="24.9619" height="27.5442"/>
+  <object id="6" type="collision" x="451.036" y="481.162" width="24.1011" height="25.8226"/>
+  <object id="10" type="collision" x="671.971" y="381.896" width="57.6706" height="59.3921"/>
  </objectgroup>
  <objectgroup id="6" name="objects">
-  <object id="14" name="Mob" class="Unit" x="667.928" y="165.45">
+  <object id="14" name="Mob" type="dreamland/Characters/Character_003" x="667.928" y="165.45">
    <properties>
+    <property name="enemy" type="bool" value="true"/>
     <property name="script" value="follower"/>
    </properties>
    <point/>
   </object>
-  <object id="15" name="Friendly Mob" class="Unit" x="384.401" y="458.746">
+  <object id="15" name="Friendly Mob" type="dreamland/Characters/Character_002" x="384.401" y="458.746">
    <properties>
-    <property name="friendly" type="bool" value="true"/>
+    <property name="thinker" value="Talker"/>
    </properties>
    <point/>
   </object>
-  <object id="17" name="Portal to Instance" class="Portal" x="749.333" y="142">
+  <object id="17" name="Portal to Instance" type="Portal" x="749.333" y="142">
    <properties>
     <property name="map" value="start-2.tmx"/>
     <property name="x" type="float" value="500"/>

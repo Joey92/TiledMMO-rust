@@ -3,14 +3,17 @@ use bevy::core::Name;
  * Everything that creatures and players have in common
  */
 use bevy::prelude::*;
-use bevy_spatial::kdtree::KDTree2;
+
 use tiled_game::components::*;
 
 use super::combat::DoDamageEvent;
 
+#[derive(Component)]
+pub struct Teleporting(pub Entity); // map instance entity
+
 // A vector that the movement system will try to get to
 #[derive(Component)]
-pub struct MoveDestination(pub Vec3);
+pub struct Move(pub Vec3);
 
 // Allows a unit to follow another unit
 #[derive(Component)]
@@ -25,10 +28,6 @@ impl Default for Speed {
         Self(1.0)
     }
 }
-
-// spatial index for fast lookup of nearby entities
-// All units with the Name component are tracked by the spatial index
-pub type UnitsNearby = KDTree2<Unit>;
 
 #[derive(Component)]
 pub struct Faction(pub String);
@@ -94,7 +93,7 @@ impl Plugin for UnitPlugin {
 // Moves entities towards their destination
 fn movement_system(
     mut commands: Commands,
-    mut movements: Query<(Entity, &mut Transform, &MoveDestination, &Speed)>,
+    mut movements: Query<(Entity, &mut Transform, &Move, &Speed)>,
 ) {
     for (entity, mut transform, destination, speed) in movements.iter_mut() {
         let distance = transform.translation.distance(destination.0);
@@ -104,7 +103,7 @@ fn movement_system(
             transform.translation += direction * speed.0;
         } else {
             // reached our destination
-            commands.entity(entity).remove::<MoveDestination>();
+            commands.entity(entity).remove::<Move>();
         }
     }
 }
@@ -122,7 +121,7 @@ fn follow_system(
             Ok(target_transform) => {
                 commands
                     .entity(entity)
-                    .insert(MoveDestination(target_transform.translation));
+                    .insert(Move(target_transform.translation));
             }
             Err(_) => {
                 commands.entity(entity).remove::<Follow>();
